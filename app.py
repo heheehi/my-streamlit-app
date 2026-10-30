@@ -44,7 +44,7 @@ if st.button("번역하기"):
             response = client.responses.create(
                 model="gpt-4o-mini",
                 input=[
-                    {"role": "system", "content":korean_text},
+                    {"role": "system", "content":sys_role},
                     {"role": "user", "content":prompt}
                 ]
             )
