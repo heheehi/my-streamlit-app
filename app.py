@@ -9,7 +9,7 @@ client = OpenAI()
 # 페이지 설정
 st.set_page_config(page_title="OpenAI 챗봇", page_icon="🤖")
 st.title("🤖 OpenAI 번역 챗봇")
-st.write("대화를 기억하지 않는 단순 번역 챗봇입니다.")
+st.write("대화를 기억하지 않는 번역 챗봇입니다.")
 
 # 사용자 입력(텍스트)
 korean_text = st.text_area(
