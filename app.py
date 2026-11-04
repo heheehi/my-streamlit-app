@@ -392,13 +392,35 @@ def page_home(api):
             if c2.button("👥 팀 업무",use_container_width=True):navigate(PAGES[4])
         with st.container(border=True):
             st.subheader("▦ 캘린더")
-            days=[today+timedelta(days=i) for i in range(-2,5)]
-            week=''.join('<div class="week-day '+('selected' if d==today else '')+'"><small>'+["월","화","수","목","금","토","일"][d.weekday()]+'</small><b>'+str(d.day)+'</b></div>' for d in days)
-            st.markdown('<div class="week-strip">'+week+'</div>',unsafe_allow_html=True)
-            events=sorted([e for e in st.session_state.events if e["date"]>=str(today)],key=event_start)[:3]
+            selected = date.fromisoformat(st.session_state.get("calendar_selected", today.isoformat()))
+            anchor = date.fromisoformat(st.session_state.get("calendar_anchor", today.isoformat()))
+            back,month_label,forward = st.columns([1,4,1])
+            if back.button("‹", key="calendar_prev", use_container_width=True):
+                st.session_state.calendar_anchor = (anchor-timedelta(days=7)).isoformat()
+                st.rerun()
+            month_label.markdown(f"**{anchor:%Y년 %m월}**")
+            if forward.button("›", key="calendar_next", use_container_width=True):
+                st.session_state.calendar_anchor = (anchor+timedelta(days=7)).isoformat()
+                st.rerun()
+            days=[anchor+timedelta(days=i) for i in range(-2,5)]
+            for col,day in zip(st.columns(7),days):
+                weekday=["월","화","수","목","금","토","일"][day.weekday()]
+                with col:
+                    if st.button(f"{weekday} {day.day}",key="cal_"+day.isoformat(),type="primary" if selected==day else "secondary",use_container_width=True):
+                        st.session_state.calendar_selected = day.isoformat()
+                        st.rerun()
+            st.markdown(f"**{selected:%Y년 %m월 %d일} 일정**")
+            events=sorted([event for event in st.session_state.events if event["date"]==selected.isoformat()],key=event_start)
             for event in events:
                 st.markdown('<div class="event-card"><strong>'+escape(event["title"])+'</strong><br><small>'+escape(event["date"])+' · '+escape(event["time"])+'</small></div>',unsafe_allow_html=True)
-            if not events:st.caption("다가오는 일정이 없습니다.")
+            if not events:st.caption("선택한 날짜에 등록된 일정이 없습니다.")
+            if st.button("어제·내일 예시 일정 추가", key="calendar_examples"):
+                for offset,title,hour,minute in [(-1,"[예시] 마케팅 회의 내용 정리",10,0),(1,"[예시] 경쟁사 분석 보고서 검토",14,30)]:
+                    day=today+timedelta(days=offset)
+                    if not any(event["title"]==title and event["date"]==day.isoformat() for event in st.session_state.events):
+                        store_event(title,day,time(hour,minute),60)
+                st.session_state.calendar_selected = (today+timedelta(days=1)).isoformat()
+                st.rerun()
             if st.button("＋ 일정 등록",key="home_event"):navigate(PAGES[3])
         with st.container(border=True):
             st.subheader("◷ 마감 알림")
