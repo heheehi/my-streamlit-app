@@ -83,8 +83,7 @@ def new_chat():
 
 
 def navigate(page, prompt=""):
-    st.session_state.page = page
-    st.session_state.sidebar_navigation = page
+    st.session_state.navigation_target = page
     if prompt:
         st.session_state.pending_prompt = prompt
     st.rerun()
@@ -414,14 +413,10 @@ def page_home(api):
             for event in events:
                 st.markdown('<div class="event-card"><strong>'+escape(event["title"])+'</strong><br><small>'+escape(event["date"])+' · '+escape(event["time"])+'</small></div>',unsafe_allow_html=True)
             if not events:st.caption("선택한 날짜에 등록된 일정이 없습니다.")
-            if st.button("어제·내일 예시 일정 추가", key="calendar_examples"):
-                for offset,title,hour,minute in [(-1,"[예시] 마케팅 회의 내용 정리",10,0),(1,"[예시] 경쟁사 분석 보고서 검토",14,30)]:
-                    day=today+timedelta(days=offset)
-                    if not any(event["title"]==title and event["date"]==day.isoformat() for event in st.session_state.events):
-                        store_event(title,day,time(hour,minute),60)
-                st.session_state.calendar_selected = (today+timedelta(days=1)).isoformat()
-                st.rerun()
-            if st.button("＋ 일정 등록",key="home_event"):navigate(PAGES[3])
+            if st.button("＋ 일정 등록",key="home_event"):
+                st.session_state.open_schedule = True
+                st.session_state.event_default_date = selected.isoformat()
+                navigate(PAGES[3])
         with st.container(border=True):
             st.subheader("◷ 마감 알림")
             tasks=sorted([t for t in st.session_state.tasks if t["status"]!="완료"],key=task_due)[:3]
@@ -541,7 +536,10 @@ def page_files():
 
 def page_tasks():
     st.title("✅ 내 작업 · 일정")
-    a, b = st.tabs(["업무 체크리스트", "일정 관리"])
+    if st.session_state.get("open_schedule", False):
+        b, a = st.tabs(["일정 관리", "업무 체크리스트"])
+    else:
+        a, b = st.tabs(["업무 체크리스트", "일정 관리"])
     with a:
         with st.form("task_add", clear_on_submit=True):
             st.subheader("업무 추가")
@@ -581,7 +579,7 @@ def page_tasks():
             st.subheader("일정 등록")
             title = st.text_input("일정명")
             c1, c2, c3 = st.columns(3)
-            day_text = c1.text_input("날짜 (YYYY-MM-DD)", value=now().date().isoformat())
+            day_text = c1.text_input("날짜 (YYYY-MM-DD)", value=st.session_state.get("event_default_date", now().date().isoformat()))
             time_text = c2.text_input("시간 (HH:MM)", value="14:00")
             reminder = c3.radio("미리 알림", [10, 30, 60, 1440], index=2, format_func=lambda x: "하루 전" if x == 1440 else f"{x}분 전")
             if st.form_submit_button("일정 저장"):
@@ -755,6 +753,10 @@ def app():
     </style>""", unsafe_allow_html=True)
     st.markdown("<style>\n[data-testid=\"stAppViewContainer\"]{background-color:#faf9ff!important;background-image:linear-gradient(#eae7f550 1px,transparent 1px),linear-gradient(90deg,#eae7f550 1px,transparent 1px)!important;background-size:40px 40px!important}\n[data-testid=\"stSidebar\"]{background:white!important;border-right:1px solid #eeecf6!important}\n[data-testid=\"stSidebar\"] .stButton button{background:linear-gradient(100deg,#8d78df,#ada0ee)!important;color:white!important}\n[data-testid=\"stSidebar\"] [role=\"radiogroup\"] label:has(input:checked){background:#f1edff!important;color:#7a64cb!important}\n.stButton button{border-radius:22px!important;border-color:#ded7f1!important;color:#7866b5!important}\n[data-testid=\"stVerticalBlockBorderWrapper\"]{background:white;border-radius:20px!important;box-shadow:0 5px 25px #6e5da408}\nh1,h2,h3{color:#302c40!important}.hello{font-size:34px!important;margin:7px 0!important}\n.gradient-title{font-size:30px;font-weight:750;background:linear-gradient(90deg,#23d1c8,#9271dd);background-clip:text;-webkit-background-clip:text;color:transparent;margin-bottom:24px}\n.group-label{display:inline-block;font-size:11px;font-weight:700;padding:6px 10px;border-radius:6px;margin:16px 0 8px;color:#40585c}\n.workspace-row{display:flex;justify-content:space-between;gap:15px;padding:17px 0;border-top:1px solid #efedf5;font-size:14px}.workspace-row span{color:#9e8cbd;font-size:12px}\n.week-strip{display:flex;justify-content:space-between;gap:4px;margin:20px 0}.week-day{display:flex;flex-direction:column;align-items:center;padding:10px 12px;border-radius:12px;gap:5px}.week-day small{color:#aaa2b7}.week-day.selected{background:#8c75dd;color:white}.week-day.selected small{color:white}.event-card{padding:18px;background:#f5f1ff;border-radius:14px;margin:12px 0}.event-card small{color:#91869f}\n</style>",unsafe_allow_html=True)
     init_state()
+    if "navigation_target" in st.session_state:
+        destination = st.session_state.pop("navigation_target")
+        st.session_state.page = destination
+        st.session_state.sidebar_navigation = destination
     api = client_or_none()
     with st.sidebar:
         st.markdown("### 🤖 AI 개인비서 에이블")
