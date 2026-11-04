@@ -431,6 +431,16 @@ def page_chat(api):
         added = add_uploads(uploads)
         if added:
             st.success(f"자료실에 {added}개 파일 저장했어. 현재 세션에서 질문할 때 참고할 수 있어.")
+    with st.expander("회의록 직접 붙여넣기", expanded=False):
+        pasted = st.text_area("회의록 내용", height=180, key="pasted_meeting")
+        if st.button("회의록 자료에 추가"):
+            if pasted.strip():
+                data = pasted.encode("utf-8")
+                file_id = hashlib.sha256(data).hexdigest()[:20]
+                st.session_state.files[file_id] = {"name":"붙여넣은_회의록.txt","data":data,"mime":"text/plain","text":pasted[:40000]}
+                st.success("회의록을 자료실에 추가했습니다. 아래에서 요약을 요청하세요.")
+            else:
+                st.warning("회의록 내용을 입력해 주세요.")
     p1, p2, p3 = st.columns(3)
     for c, label, prompt in zip((p1, p2, p3),
                                ("회의록 요약", "자료 분석", "영어 번역"),
