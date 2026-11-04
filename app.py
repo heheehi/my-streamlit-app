@@ -301,7 +301,7 @@ def email_previews(prefix):
                 if not to.strip() or not subject.strip() or not body.strip():
                     st.error("받는 사람·제목·본문을 확인해 주세요.")
                 elif not safe_email():
-                    st.warning("Streamlit Secrets의 APP_ACCESS_PIN과 이메일 설정이 필요합니다.")
+                    st.warning("Streamlit Secrets의 이메일 주소와 앱 비밀번호 설정이 필요합니다.")
                 else:
                     try:
                         send_mail(to.strip(),subject,body)
@@ -599,7 +599,7 @@ def page_team():
 
 def safe_email():
     # 공개 배포된 시제품에서 SMTP·IMAP 계정이 무단 이용되는 것을 막기 위해 반드시 앱 로그인 필요
-    return bool(secret("APP_ACCESS_PIN")) and bool(email_setting("EMAIL_ADDRESS")) and bool(email_setting("EMAIL_APP_PASSWORD"))
+    return bool(email_setting("EMAIL_ADDRESS")) and bool(email_setting("EMAIL_APP_PASSWORD"))
 
 
 def send_mail(to, subject, body):
@@ -644,7 +644,6 @@ def page_email():
     checks = {
         "이메일 주소 (GMAIL_ADDRESS 또는 EMAIL_ADDRESS)": bool(email_setting("EMAIL_ADDRESS")),
         "앱 비밀번호 (GMAIL_APP_PASSWORD 또는 EMAIL_APP_PASSWORD)": bool(email_setting("EMAIL_APP_PASSWORD")),
-        "앱 접속 PIN (APP_ACCESS_PIN)": bool(secret("APP_ACCESS_PIN")),
     }
     if not safe_email():
         for label, ready in checks.items():
@@ -732,17 +731,6 @@ def app():
     </style>""", unsafe_allow_html=True)
     st.markdown("<style>\n[data-testid=\"stAppViewContainer\"]{background-color:#faf9ff!important;background-image:linear-gradient(#eae7f550 1px,transparent 1px),linear-gradient(90deg,#eae7f550 1px,transparent 1px)!important;background-size:40px 40px!important}\n[data-testid=\"stSidebar\"]{background:white!important;border-right:1px solid #eeecf6!important}\n[data-testid=\"stSidebar\"] .stButton button{background:linear-gradient(100deg,#8d78df,#ada0ee)!important;color:white!important}\n[data-testid=\"stSidebar\"] [role=\"radiogroup\"] label:has(input:checked){background:#f1edff!important;color:#7a64cb!important}\n.stButton button{border-radius:22px!important;border-color:#ded7f1!important;color:#7866b5!important}\n[data-testid=\"stVerticalBlockBorderWrapper\"]{background:white;border-radius:20px!important;box-shadow:0 5px 25px #6e5da408}\nh1,h2,h3{color:#302c40!important}.hello{font-size:34px!important;margin:7px 0!important}\n.gradient-title{font-size:30px;font-weight:750;background:linear-gradient(90deg,#23d1c8,#9271dd);background-clip:text;-webkit-background-clip:text;color:transparent;margin-bottom:24px}\n.group-label{display:inline-block;font-size:11px;font-weight:700;padding:6px 10px;border-radius:6px;margin:16px 0 8px;color:#40585c}\n.workspace-row{display:flex;justify-content:space-between;gap:15px;padding:17px 0;border-top:1px solid #efedf5;font-size:14px}.workspace-row span{color:#9e8cbd;font-size:12px}\n.week-strip{display:flex;justify-content:space-between;gap:4px;margin:20px 0}.week-day{display:flex;flex-direction:column;align-items:center;padding:10px 12px;border-radius:12px;gap:5px}.week-day small{color:#aaa2b7}.week-day.selected{background:#8c75dd;color:white}.week-day.selected small{color:white}.event-card{padding:18px;background:#f5f1ff;border-radius:14px;margin:12px 0}.event-card small{color:#91869f}\n</style>",unsafe_allow_html=True)
     init_state()
-    pin = secret("APP_ACCESS_PIN")
-    if pin and not st.session_state.auth:
-        st.title("🔒 에이블 접근 인증")
-        entered = st.text_input("앱 접근 PIN", type="password")
-        if st.button("입장"):
-            if hmac.compare_digest(entered, pin):
-                st.session_state.auth = True
-                st.rerun()
-            else:
-                st.error("PIN이 일치하지 않아.")
-        st.stop()
     api = client_or_none()
     with st.sidebar:
         st.markdown("### 🤖 AI 개인비서 에이블")
@@ -754,9 +742,6 @@ def app():
         st.divider()
         st.caption("✅ AI 연결됨" if api else "⚠️ OpenAI API 연결 필요")
         st.caption("데모 데이터: 현재 세션 전용")
-        if pin and st.button("로그아웃"):
-            st.session_state.auth = False
-            st.rerun()
     page = st.session_state.page
     if page == PAGES[0]:
         page_home(api)
