@@ -273,10 +273,11 @@ def tool_reply(api, messages):
         result = {"status":"unsupported"}
         if call.function.name == "prepare_email":
             mail = json.loads(call.function.arguments)
-            mail["to"] = mail.get("to") or email_setting("EMAIL_ADDRESS")
+            explicit_addresses = re.findall(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}", str(next((m.get("content", "") for m in reversed(messages) if m.get("role") == "user"), "")))
+            mail["to"] = explicit_addresses[0] if len(explicit_addresses) == 1 else (mail.get("to") or email_setting("EMAIL_ADDRESS"))
             mail.update(id=str(uuid.uuid4()), sent=False)
             st.session_state.setdefault("email_drafts", []).append(mail)
-            result = {"status":"draft_ready","message":"아직 발송하지 않았습니다. 미리보기에서 확인 후 발송할 수 있습니다."}
+            result = {"status":"draft_ready", "to":mail["to"], "subject":mail["subject"], "body":mail["body"], "message":"아직 발송하지 않았습니다. 미리보기에서 확인 후 발송할 수 있습니다."}
         messages.append({"role":"tool","tool_call_id":call.id,"content":json.dumps(result,ensure_ascii=False)})
     stream = api.chat.completions.create(model=MODEL_CHOICES[st.session_state.model_label], messages=messages, stream=True)
     def pieces():
