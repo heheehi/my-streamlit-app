@@ -84,15 +84,19 @@ if "request_number" not in st.session_state:
     st.session_state.request_number = 0
 
 # 지시 영역 — 원본처럼 TXT 파일과 녹음으로 입력받습니다.
+uploaded_file = st.file_uploader("텍스트 파일 업로드", type=["txt"])
+with st.expander("파일 업로드가 안 될 때"):
+    pasted_text = st.text_area("회의록 붙여넣기", help="파일 업로드에 실패하면 파일 내용을 여기에 붙여넣어주세요.")
+# 파일 업로드는 별도로 완료하고, 요청만 폼에서 제출합니다.
 with st.form("task_form"):
-    uploaded_file = st.file_uploader("텍스트 파일 업로드", type=["txt"])
+    typed_question = st.text_input("요청 직접 입력 (선택)", help="음성 인식이 틀렸을 때 여기에 정확한 요청을 적어주세요. 글을 입력하면 녹음보다 우선합니다.")
     audio_value = st.audio_input("무엇을 도와드릴까요?")
     submit = st.form_submit_button("실행")
 
 # 버튼을 눌렀을 때만 실행
 if submit:
     # 업로드 된 파일이 있으면 디코딩
-    text = ""
+    text = pasted_text.strip()
     if uploaded_file is not None:
         try:
             text = uploaded_file.getvalue().decode("utf-8-sig")
@@ -101,8 +105,8 @@ if submit:
             st.stop()
 
     # 녹음이 없으면 녹음 요청
-    if audio_value is None:
-        st.warning("음성을 녹음해주세요.")
+    if audio_value is None and not typed_question.strip():
+        st.warning("음성을 녹음하거나 요청을 직접 입력해주세요.")
         st.stop()
 
     # 시스템 메세지
@@ -115,14 +119,20 @@ if submit:
 
     try:
         # STT: 음성 → 텍스트
-        transcript = client.audio.transcriptions.create(
-            model="whisper-1",
-            file=("audio.wav", audio_value.getvalue(), "audio/wav"))
-        if not transcript.text.strip():
+        question = typed_question.strip()
+        if not question:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1",
+                file=("audio.wav", audio_value.getvalue(), "audio/wav"),
+                language="ko",  # 한국어 녹음임을 명시
+                prompt="한국어 업무 요청입니다. 회의 내용, 회의록, 김 대리, 업무, 요약, 이메일.",
+            )
+            question = transcript.text.strip()
+        if not question:
             raise ValueError("인식된 질문이 없습니다.")
 
         # 사용자 메시지
-        user_message = {"role": "user", "content": transcript.text}
+        user_message = {"role": "user", "content": question}
         input_messages.append(user_message)
 
         # LLM 호출 및 응답 듣기
@@ -177,13 +187,16 @@ if submit:
                     )
                     with wave.open(io.BytesIO(speech_response.content), "rb") as part:
                         if start == 0:
-                            combined.setparams(part.getparams())  # 첫 음성의 형식 사용
+                            combined.setnchannels(part.getnchannels())
+                            combined.setsampwidth(part.getsampwidth())
+                            combined.setframerate(part.getframerate())
+                            # 파일 길이는 복사하지 않고 실제 음성을 쓰며 새로 계산
                         combined.writeframes(part.readframes(part.getnframes()))
             speech_bytes = audio_buffer.getvalue()
-        except Exception:
-            st.warning("음성 생성에 실패했습니다. 글자 답변을 확인해주세요.")
+        except Exception as error:
+            st.warning(f"음성 생성에 실패했습니다. 글자 답변을 확인해주세요. (오류 종류: {type(error).__name__})")
         st.session_state.last_result = {
-            "question": transcript.text, "answer": answer, "audio": speech_bytes, "format": "audio/wav",
+            "question": question, "answer": answer, "audio": speech_bytes, "format": "audio/wav",
         }
     except Exception:
         st.error("처리에 실패했습니다. 녹음과 API 설정·연결을 확인해주세요.")
