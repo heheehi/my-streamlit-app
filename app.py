@@ -6,6 +6,8 @@ from openai import OpenAI
 # [추가] 01 노트북의 이메일 발송 함수에서 사용하는 라이브러리
 import smtplib
 import ssl
+import io    # 음성을 메모리 안에서 합치기
+import wave  # WAV 음성 파일 읽기와 쓰기
 from email.mime.text import MIMEText
 
 # OpenAI 클라이언트 생성
@@ -164,14 +166,24 @@ if submit:
         # [추가] 01 노트북의 TTS: 글자 답변을 음성으로 변환
         speech_bytes = None
         try:
-            speech_response = client.audio.speech.create(
-                model="gpt-4o-mini-tts", voice="nova", input=answer[:4000],
-            )
-            speech_bytes = speech_response.content
+            # 긴 답변도 빠짐없이 읽도록 1,000자씩 변환한 뒤 한 파일로 합칩니다.
+            # range(0, 길이, 1000): 시작 위치를 0, 1000, 2000...으로 이동
+            audio_buffer = io.BytesIO()
+            with wave.open(audio_buffer, "wb") as combined:
+                for start in range(0, len(answer), 1000):
+                    speech_response = client.audio.speech.create(
+                        model="gpt-4o-mini-tts", voice="nova",
+                        input=answer[start:start + 1000], response_format="wav",
+                    )
+                    with wave.open(io.BytesIO(speech_response.content), "rb") as part:
+                        if start == 0:
+                            combined.setparams(part.getparams())  # 첫 음성의 형식 사용
+                        combined.writeframes(part.readframes(part.getnframes()))
+            speech_bytes = audio_buffer.getvalue()
         except Exception:
             st.warning("음성 생성에 실패했습니다. 글자 답변을 확인해주세요.")
         st.session_state.last_result = {
-            "question": transcript.text, "answer": answer, "audio": speech_bytes,
+            "question": transcript.text, "answer": answer, "audio": speech_bytes, "format": "audio/wav",
         }
     except Exception:
         st.error("처리에 실패했습니다. 녹음과 API 설정·연결을 확인해주세요.")
@@ -184,8 +196,8 @@ if st.session_state.last_result is not None:
     st.subheader("AI 답변")
     st.write(result["answer"])
     if result["audio"]:
-        st.caption("AI가 생성한 음성입니다. 긴 답변은 앞부분만 읽습니다.")
-        st.audio(result["audio"], format="audio/mp3", autoplay=True)
+        st.caption("AI가 생성한 음성입니다.")
+        st.audio(result["audio"], format=result.get("format", "audio/mp3"), autoplay=True)
 
 # [추가] GPT가 이메일 도구를 요청한 경우에만 미리보기가 나타납니다.
 for i, mail in enumerate(st.session_state.pending_emails):
