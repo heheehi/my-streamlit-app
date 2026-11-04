@@ -350,87 +350,60 @@ def run_chat(prompt, api):
 
 
 
+
 def page_home(api):
     from html import escape
-    st.markdown("""
-    <style>
-    .able-header {display:flex;justify-content:space-between;align-items:center;margin:0 0 24px;}
-    .able-header h1 {font-size:36px!important;line-height:1.25;letter-spacing:-1.6px;margin:0;padding:0!important;font-weight:850;}
-    .able-header h1 span {color:#2162ed;}
-    .able-header p {margin:10px 0 0;color:#7c8799;font-size:17px;}
-    .able-profile {color:#4b5871;font-size:14px;background:white;border:1px solid #e6ebf5;border-radius:24px;padding:10px 16px;}
-    .able-hero {display:flex;align-items:center;gap:25px;padding:24px 34px;margin-bottom:22px;border-radius:22px;background:linear-gradient(115deg,#eaf2ff 0%,#dfeaff 60%,#bed6ff 100%);border:1px solid #dfebff;overflow:hidden;min-height:132px;}
-    .able-robot {font-size:67px;line-height:1;filter:drop-shadow(0 8px 8px #b6cdf7);}
-    .able-hello {font-size:23px;font-weight:750;color:#162442;border-left:2px solid #afc0e1;padding-left:26px;}
-    .able-hello span {color:#2162ed;}
-    .able-stat {display:flex;align-items:center;gap:19px;background:linear-gradient(130deg,#fff,#f8faff);border:1px solid #dfe6f1;border-radius:17px;padding:22px;box-shadow:0 3px 10px #263c6b08;margin-bottom:24px;}
-    .able-stat-icon {width:56px;height:56px;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:25px;background:#e9f0ff;}
-    .able-stat-label {font-size:15px;color:#4a556b;font-weight:650;margin-bottom:3px;}
-    .able-stat-value {font-size:31px;font-weight:800;color:#14213b;line-height:1.15;}
-    .able-panel-title {font-size:21px;font-weight:750;color:#17233b;margin-bottom:15px;}
-    .able-row {display:flex;align-items:center;gap:17px;padding:16px 0;border-top:1px solid #edf0f6;}
-    .able-badge {min-width:77px;text-align:center;background:#eaf1ff;color:#2462e8;padding:9px 12px;border-radius:10px;font-weight:750;font-size:15px;}
-    .able-row-title {font-size:16px;color:#24314a;font-weight:700;}
-    .able-row-sub {font-size:13px;color:#8a95a8;margin-top:4px;}
-    .able-empty {padding:26px 4px;color:#919db0;font-size:14px;min-height:120px;}
-    .able-brief {display:flex;gap:28px;align-items:center;background:linear-gradient(110deg,#edf1ff,#e7eaff);border:1px solid white;border-radius:19px;padding:25px 30px;margin:22px 0 12px;}
-    .able-brief-title {white-space:nowrap;color:#25385e;font-size:20px;font-weight:750;}
-    .able-brief-body {border-left:2px solid #bfc9e4;padding-left:27px;color:#566581;font-size:15px;line-height:1.8;}
-    @media(max-width:750px){.able-header h1{font-size:27px!important}.able-profile{display:none}.able-hello{font-size:18px}.able-hero{padding:22px;gap:15px}.able-brief{display:block}.able-brief-body{border:0;padding:12px 0 0}.able-stat{padding:16px;gap:12px}}
-    </style>
-    """, unsafe_allow_html=True)
-    profile = escape(st.session_state.profile)
-    st.markdown(f'<div class="able-header"><div><h1>AI 개인비서 <span>에이블</span></h1><p>당신의 업무를 더 스마트하게, 에이블이 도와드립니다.</p></div><div class="able-profile">🔔 &nbsp; │ &nbsp; 👤 {profile} 님</div></div>', unsafe_allow_html=True)
-    st.markdown('<div class="able-hero"><div class="able-robot">🤖</div><div class="able-hello">안녕하세요! 오늘도 <span>에이블</span>이 업무를 정리해드릴게요.</div></div>', unsafe_allow_html=True)
-    icons = ["▤","✓","◷","!"]
-    colors = [("#e9f0ff","#2665ef"),("#e2f7ee","#35b885"),("#e9f0ff","#3776fa"),("#ffebee","#f65c6c")]
-    for col,label,value,icon,(bg,fg) in zip(st.columns(4),["전체 업무","완료 업무","진행 중","마감 임박"],totals(),icons,colors):
-        with col:
-            st.markdown(f'<div class="able-stat"><div class="able-stat-icon" style="background:{bg};color:{fg}">{icon}</div><div><div class="able-stat-label">{label}</div><div class="able-stat-value">{value}</div></div></div>', unsafe_allow_html=True)
-    left,right = st.columns(2,gap="medium")
-    today = now().date()
+    today=now().date()
+    st.caption(today.strftime("%Y. %m. %d")+" · ABLE WORKSPACE")
+    st.markdown('<h1 class="hello">안녕하세요, '+escape(st.session_state.profile)+' 님</h1><div class="gradient-title">오늘은 어떤 일을 도와드릴까요?</div>',unsafe_allow_html=True)
+    for c,label,page in zip(st.columns(4),["✦ AI에게 물어보기","업무 업데이트","자료실 열기","이메일 관리"],[PAGES[1],PAGES[3],PAGES[2],PAGES[5]]):
+        if c.button(label,use_container_width=True):navigate(page)
+    st.write("")
+    left,right=st.columns([1.1,1],gap="large")
     with left:
         with st.container(border=True):
-            st.markdown('<div class="able-panel-title">📅 &nbsp;오늘의 일정</div>', unsafe_allow_html=True)
-            events = sorted([e for e in st.session_state.events if e["date"]==today.isoformat()],key=lambda e:e["time"])
-            if not events:
-                st.markdown('<div class="able-empty">오늘 등록된 일정이 없습니다.<br>새 일정을 등록하고 하루를 정리해 보세요.</div>', unsafe_allow_html=True)
-            for event in events[:4]:
-                st.markdown(f'<div class="able-row"><div class="able-badge">{escape(event["time"])}</div><div><div class="able-row-title">{escape(event["title"])}</div><div class="able-row-sub">오늘의 일정</div></div></div>', unsafe_allow_html=True)
-            if st.button("전체 일정 보기 ›",key="all_events",use_container_width=True):
-                navigate(PAGES[3])
+            st.subheader("▤ 내 작업")
+            for status,label,color in [("진행 중","IN PROGRESS","#c3f0ed"),("예정","TO DO","#eceaf3"),("완료","DONE","#e1f5e9")]:
+                items=[t for t in st.session_state.tasks if t["status"]==status]
+                st.markdown(f'<div class="group-label" style="background:{color}">{label}</div> &nbsp; {len(items)}개 업무',unsafe_allow_html=True)
+                for task in sorted(items,key=task_due)[:4]:
+                    st.markdown('<div class="workspace-row"><strong>'+escape(task["title"])+'</strong><span>'+escape(task["priority"])+' · '+escape(task["date"])+'</span></div>',unsafe_allow_html=True)
+                if not items:st.caption("등록된 업무가 없습니다.")
+            if st.button("＋ 업무 추가",key="home_task"):navigate(PAGES[3])
+        with st.container(border=True):
+            st.subheader("◎ 업무 진행률")
+            total,done,doing,urgent=totals()
+            st.progress(done/total if total else 0)
+            st.caption(f"전체 {total}개 · 완료 {done}개 · 진행 중 {doing}개")
+            st.markdown("**✦ AI 업무 브리핑**")
+            if st.button("오늘의 우선순위 분석",disabled=api is None):
+                try:
+                    res=api.chat.completions.create(model=MODEL_CHOICES[st.session_state.model_label],messages=[{"role":"system","content":"김 대리의 개인비서로서 실제 업무와 일정만 근거로 오늘의 우선순위를 한국어로 제안하세요."},{"role":"user","content":json.dumps({"today":str(today),"tasks":st.session_state.tasks,"events":st.session_state.events},ensure_ascii=False,default=str)}])
+                    st.info(res.choices[0].message.content)
+                except Exception:st.warning("브리핑 생성에 실패했습니다. 다시 시도해 주세요.")
     with right:
         with st.container(border=True):
-            st.markdown('<div class="able-panel-title">🚨 &nbsp;마감 임박 업무</div>', unsafe_allow_html=True)
-            tasks = sorted([t for t in st.session_state.tasks if t["status"]!="완료"],key=task_due)[:4]
-            if not tasks:
-                st.markdown('<div class="able-empty">등록된 업무가 없습니다.<br>내 작업에서 업무와 마감일을 추가해 보세요.</div>', unsafe_allow_html=True)
-            for task in tasks:
-                days = (date.fromisoformat(task["date"])-today).days
-                badge = "오늘" if days==0 else "내일" if days==1 else f"{days}일 후" if days>0 else "기한 지남"
-                bg,fg = ("#ffe9ec","#ea4e61") if days<=0 else ("#fff3d7","#c68c24") if days==1 else ("#e5f7ef","#28976b")
-                st.markdown(f'<div class="able-row"><div class="able-badge" style="background:{bg};color:{fg}">{badge}</div><div><div class="able-row-title">{escape(task["title"])}</div><div class="able-row-sub">{escape(task["owner"])} · {escape(task["date"])} {escape(task["time"])}</div></div></div>', unsafe_allow_html=True)
-            if st.button("전체 업무 보기 ›",key="all_tasks_home",use_container_width=True):
-                navigate(PAGES[3])
-    if tasks:
-        suggested = f'오늘은 먼저 ‘{tasks[0]["title"]}’ 업무부터 확인해 보세요.'
-    else:
-        suggested = "업무와 일정을 등록하면 오늘의 우선순위를 정리해 드릴게요."
-    st.markdown(f'<div class="able-brief"><div class="able-brief-title">🤖 &nbsp; AI 업무 브리핑</div><div class="able-brief-body"><strong>{escape(suggested)}</strong><br>아래 버튼으로 AI에게 업무 순서와 진행 방법을 추천받을 수 있어요.</div></div>', unsafe_allow_html=True)
-    if st.button("오늘의 우선순위 분석", disabled=api is None):
-        context = json.dumps({"today":today.isoformat(),"tasks":st.session_state.tasks,"events":st.session_state.events},ensure_ascii=False,default=str)
-        try:
-            res = api.chat.completions.create(model=MODEL_CHOICES[st.session_state.model_label],messages=[{"role":"system","content":"김 대리의 개인비서로서 제공된 업무와 일정만 근거로 한국어로 우선순위와 업무 순서를 간단히 제안하세요. 없는 정보는 만들지 마세요."},{"role":"user","content":context}])
-            st.info(res.choices[0].message.content)
-        except Exception:
-            st.error("브리핑을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.")
-    with st.container(border=True):
-        st.markdown('<div class="able-panel-title">⚡ &nbsp;빠른 실행</div>', unsafe_allow_html=True)
-        for col,label,page,prompt in zip(st.columns(4),["🎙️ 음성 비서  ›","📝 회의록 요약  ›","✉️ 이메일 작성  ›","📅 일정 정리  ›"],[PAGES[1],PAGES[1],PAGES[5],PAGES[3]],["","첨부한 회의록을 주요 논의, 결정사항, 김 대리의 할 일로 요약해줘.","",""]):
-            with col:
-                if st.button(label,use_container_width=True):
-                    navigate(page,prompt)
-
+            st.subheader("◇ 내 업무 공간")
+            for c,label,value in zip(st.columns(3),["전체 업무","완료 업무","마감 임박"],[totals()[0],totals()[1],totals()[3]]):c.metric(label,value)
+            c1,c2=st.columns(2)
+            if c1.button("📁 자료실",use_container_width=True):navigate(PAGES[2])
+            if c2.button("👥 팀 업무",use_container_width=True):navigate(PAGES[4])
+        with st.container(border=True):
+            st.subheader("▦ 캘린더")
+            days=[today+timedelta(days=i) for i in range(-2,5)]
+            week=''.join('<div class="week-day '+('selected' if d==today else '')+'"><small>'+["월","화","수","목","금","토","일"][d.weekday()]+'</small><b>'+str(d.day)+'</b></div>' for d in days)
+            st.markdown('<div class="week-strip">'+week+'</div>',unsafe_allow_html=True)
+            events=sorted([e for e in st.session_state.events if e["date"]>=str(today)],key=event_start)[:3]
+            for event in events:
+                st.markdown('<div class="event-card"><strong>'+escape(event["title"])+'</strong><br><small>'+escape(event["date"])+' · '+escape(event["time"])+'</small></div>',unsafe_allow_html=True)
+            if not events:st.caption("다가오는 일정이 없습니다.")
+            if st.button("＋ 일정 등록",key="home_event"):navigate(PAGES[3])
+        with st.container(border=True):
+            st.subheader("◷ 마감 알림")
+            tasks=sorted([t for t in st.session_state.tasks if t["status"]!="완료"],key=task_due)[:3]
+            for task in tasks:st.write(f'**{task["title"]}** · {task["date"]} {task["time"]}')
+            if not tasks:st.caption("마감이 임박한 업무가 없습니다.")
+            if st.button("✉ 이메일 작성",key="home_mail"):navigate(PAGES[5])
 
 
 @st.fragment(run_every="60s")
@@ -541,11 +514,16 @@ def page_tasks():
             title = st.text_input("업무명")
             owner = st.text_input("담당자", value=st.session_state.profile)
             col1, col2, col3 = st.columns(3)
-            day = col1.date_input("마감일", value=now().date())
-            tm = col2.time_input("마감 시간", value=time(18, 0))
-            priority = col3.selectbox("우선순위", ["보통", "높음", "긴급", "낮음"])
+            day_text = col1.text_input("마감일 (YYYY-MM-DD)", value=now().date().isoformat())
+            time_text = col2.text_input("마감 시간 (HH:MM)", value="18:00")
+            priority = col3.radio("우선순위", ["보통", "높음", "긴급", "낮음"])
             if st.form_submit_button("업무 등록", use_container_width=True):
                 if title.strip() and owner.strip():
+                    try:
+                        day,tm = date.fromisoformat(day_text.strip()),time.fromisoformat(time_text.strip())
+                    except ValueError:
+                        st.warning("날짜는 YYYY-MM-DD, 시간은 HH:MM 형식으로 입력해 주세요.")
+                        st.stop()
                     store_task(title.strip(), owner.strip(), day, tm, priority)
                     st.success("업무를 추가했어.")
                 else:
@@ -556,7 +534,7 @@ def page_tasks():
             with st.container(border=True):
                 c1, c2, c3 = st.columns([5, 2, 1])
                 c1.write(f"**{t['title']}** · {t['owner']} · {t['priority']} · {t['date']} {t['time']}")
-                option = c2.selectbox("상태", ["예정", "진행 중", "완료"], index=["예정", "진행 중", "완료"].index(t["status"]),
+                option = c2.radio("상태", ["예정", "진행 중", "완료"], index=["예정", "진행 중", "완료"].index(t["status"]),
                                       key=f"state_{t['id']}", label_visibility="collapsed")
                 t["status"] = option
                 if c3.button("삭제", key=f"task_del_{t['id']}"):
@@ -569,11 +547,16 @@ def page_tasks():
             st.subheader("일정 등록")
             title = st.text_input("일정명")
             c1, c2, c3 = st.columns(3)
-            day = c1.date_input("날짜", value=now().date())
-            tm = c2.time_input("시간", value=time(14, 0))
-            reminder = c3.selectbox("미리 알림", [10, 30, 60, 1440], index=2, format_func=lambda x: "하루 전" if x == 1440 else f"{x}분 전")
+            day_text = c1.text_input("날짜 (YYYY-MM-DD)", value=now().date().isoformat())
+            time_text = c2.text_input("시간 (HH:MM)", value="14:00")
+            reminder = c3.radio("미리 알림", [10, 30, 60, 1440], index=2, format_func=lambda x: "하루 전" if x == 1440 else f"{x}분 전")
             if st.form_submit_button("일정 저장"):
                 if title.strip():
+                    try:
+                        day,tm = date.fromisoformat(day_text.strip()),time.fromisoformat(time_text.strip())
+                    except ValueError:
+                        st.warning("날짜는 YYYY-MM-DD, 시간은 HH:MM 형식으로 입력해 주세요.")
+                        st.stop()
                     store_event(title.strip(), day, tm, reminder)
                     st.success("일정을 등록했어.")
                 else:
@@ -594,7 +577,7 @@ def page_team():
     st.title("👥 팀 업무 현황")
     st.caption("현재 세션에서 저장된 업무를 담당자별로 조회해. 실제 팀원 계정과 동기화되는 협업 DB는 아직 없어.")
     owners = sorted(set(t["owner"] for t in st.session_state.tasks))
-    selection = st.selectbox("담당자", ["전체"] + owners)
+    selection = st.radio("담당자", ["전체"] + owners)
     items = [t for t in st.session_state.tasks if selection == "전체" or t["owner"] == selection]
     if items:
         st.dataframe(pd.DataFrame(items)[["title", "owner", "status", "priority", "date", "time"]].rename(columns={
@@ -691,10 +674,10 @@ def page_settings():
     st.title("⚙️ 설정")
     st.session_state.profile = st.text_input("표시 이름", value=st.session_state.profile)
     labels = list(MODEL_CHOICES)
-    st.session_state.model_label = st.selectbox("AI 모델", labels, index=labels.index(st.session_state.model_label))
+    st.session_state.model_label = st.radio("AI 모델", labels, index=labels.index(st.session_state.model_label))
     st.caption("Luna 6은 화면에서 사용하는 별칭이야. 실제 호출 모델은 GPT-4o mini이며 별도 Luna 6 API가 아니야.")
     st.session_state.prompt = st.text_area("공통 시스템 프롬프트", value=st.session_state.prompt, height=150)
-    st.session_state.voice = st.selectbox("음성 선택", VOICES, index=VOICES.index(st.session_state.voice))
+    st.session_state.voice = st.radio("음성 선택", VOICES, index=VOICES.index(st.session_state.voice))
     st.session_state.tts = st.toggle("AI 답변을 TTS로 자동 재생", value=st.session_state.tts)
     st.caption("브라우저 정책에 따라 자동 재생이 차단될 수 있어. TTS는 AI가 생성하는 합성 음성이야.")
     st.info("보안: 실제 API 키·메일 앱 비밀번호는 코드가 아닌 Streamlit Secrets에 넣어 줘.")
@@ -727,6 +710,7 @@ def app():
         .stButton > button[kind="primary"] {background:#2563eb;border-radius:12px;}
         h1,h2,h3 {letter-spacing:-.02em;}
     </style>""", unsafe_allow_html=True)
+    st.markdown("<style>\n[data-testid=\"stAppViewContainer\"]{background-color:#faf9ff!important;background-image:linear-gradient(#eae7f550 1px,transparent 1px),linear-gradient(90deg,#eae7f550 1px,transparent 1px)!important;background-size:40px 40px!important}\n[data-testid=\"stSidebar\"]{background:white!important;border-right:1px solid #eeecf6!important}\n[data-testid=\"stSidebar\"] .stButton button{background:linear-gradient(100deg,#8d78df,#ada0ee)!important;color:white!important}\n[data-testid=\"stSidebar\"] [role=\"radiogroup\"] label:has(input:checked){background:#f1edff!important;color:#7a64cb!important}\n.stButton button{border-radius:22px!important;border-color:#ded7f1!important;color:#7866b5!important}\n[data-testid=\"stVerticalBlockBorderWrapper\"]{background:white;border-radius:20px!important;box-shadow:0 5px 25px #6e5da408}\nh1,h2,h3{color:#302c40!important}.hello{font-size:34px!important;margin:7px 0!important}\n.gradient-title{font-size:30px;font-weight:750;background:linear-gradient(90deg,#23d1c8,#9271dd);background-clip:text;-webkit-background-clip:text;color:transparent;margin-bottom:24px}\n.group-label{display:inline-block;font-size:11px;font-weight:700;padding:6px 10px;border-radius:6px;margin:16px 0 8px;color:#40585c}\n.workspace-row{display:flex;justify-content:space-between;gap:15px;padding:17px 0;border-top:1px solid #efedf5;font-size:14px}.workspace-row span{color:#9e8cbd;font-size:12px}\n.week-strip{display:flex;justify-content:space-between;gap:4px;margin:20px 0}.week-day{display:flex;flex-direction:column;align-items:center;padding:10px 12px;border-radius:12px;gap:5px}.week-day small{color:#aaa2b7}.week-day.selected{background:#8c75dd;color:white}.week-day.selected small{color:white}.event-card{padding:18px;background:#f5f1ff;border-radius:14px;margin:12px 0}.event-card small{color:#91869f}\n</style>",unsafe_allow_html=True)
     init_state()
     pin = secret("APP_ACCESS_PIN")
     if pin and not st.session_state.auth:
