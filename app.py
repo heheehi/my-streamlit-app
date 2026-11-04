@@ -31,7 +31,7 @@ from openai import OpenAI
 
 KST = ZoneInfo("Asia/Seoul")
 PAGES = ["🏠 홈", "💬 채팅", "📁 자료실", "✅ 내 작업", "👥 팀 업무 현황", "✉️ 이메일 관리", "⚙️ 설정"]
-MODEL_CHOICES = {"Luna 6 (UI 별칭 · GPT-4o mini 사용)": "gpt-4o-mini", "GPT-4o mini": "gpt-4o-mini", "GPT-4o": "gpt-4o"}
+MODEL_CHOICES = {"Luna 6": "gpt-6-luna"}
 VOICES = ["coral", "alloy", "nova", "shimmer", "sage", "marin", "cedar"]
 MAX_UPLOAD_MB = 15
 
@@ -65,6 +65,8 @@ def init_state():
         "last_audio_hash": "", "pending_prompt": "", "email_log": [], "profile": "사용자",
         "notified": set(), "last_audio": b"", "last_audio_text": "", "auth": False,
     }
+    if st.session_state.get("model_label") not in MODEL_CHOICES:
+        st.session_state.model_label = "Luna 6"
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
@@ -217,7 +219,7 @@ def maybe_schedule_from_message(message, api):
             "형식: {\"valid\":true,\"title\":\"회의\",\"date\":\"2026-11-10\",\"time\":\"15:00\"}. "
             f"요청: {message}"
         )
-        r = api.chat.completions.create(model="gpt-4o-mini", response_format={"type": "json_object"},
+        r = api.chat.completions.create(model="gpt-6-luna", response_format={"type": "json_object"},
                                         messages=[{"role": "user", "content": prompt}])
         data = json.loads(r.choices[0].message.content or "{}")
         if not data.get("valid"):
@@ -694,7 +696,7 @@ def page_settings():
     st.session_state.profile = st.text_input("표시 이름", value=st.session_state.profile)
     labels = list(MODEL_CHOICES)
     st.session_state.model_label = st.radio("AI 모델", labels, index=labels.index(st.session_state.model_label))
-    st.caption("Luna 6은 화면에서 사용하는 별칭이야. 실제 호출 모델은 GPT-4o mini이며 별도 Luna 6 API가 아니야.")
+    st.caption("실제 API 모델: gpt-6-luna")
     st.session_state.prompt = st.text_area("공통 시스템 프롬프트", value=st.session_state.prompt, height=150)
     st.session_state.voice = st.radio("음성 선택", VOICES, index=VOICES.index(st.session_state.voice))
     st.session_state.tts = st.toggle("AI 답변을 TTS로 자동 재생", value=st.session_state.tts)
