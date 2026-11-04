@@ -641,8 +641,18 @@ def inbox_messages():
 def page_email():
     st.title("✉️ 이메일 관리")
     st.caption("이메일 발송은 미리보기와 명시적 확인 후에만 실행돼.")
+    checks = {
+        "이메일 주소 (GMAIL_ADDRESS 또는 EMAIL_ADDRESS)": bool(email_setting("EMAIL_ADDRESS")),
+        "앱 비밀번호 (GMAIL_APP_PASSWORD 또는 EMAIL_APP_PASSWORD)": bool(email_setting("EMAIL_APP_PASSWORD")),
+        "앱 접속 PIN (APP_ACCESS_PIN)": bool(secret("APP_ACCESS_PIN")),
+    }
     if not safe_email():
-        st.warning("이메일은 아직 연결되지 않았어. APP_ACCESS_PIN, EMAIL_ADDRESS, EMAIL_APP_PASSWORD를 Streamlit Secrets에 설정해야 해.")
+        for label, ready in checks.items():
+            if ready:
+                st.success(label + " · 등록됨")
+            else:
+                st.warning(label + " · 미등록")
+        st.info("등록된 이메일 설정은 그대로 사용합니다. 표시된 미등록 항목만 Streamlit Secrets에 추가해 주세요.")
         return
     email_previews("manage_")
     write, inbox, log = st.tabs(["이메일 작성·발송", "받은편지함", "발송 이력"])
