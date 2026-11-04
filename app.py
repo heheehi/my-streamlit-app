@@ -706,7 +706,20 @@ def page_email():
                 st.text(email["body"])
     with log:
         if st.session_state.email_log:
-            st.dataframe(pd.DataFrame(st.session_state.email_log), use_container_width=True, hide_index=True)
+            from html import escape
+            rows = []
+            for mail in reversed(st.session_state.email_log):
+                rows.append("<tr><td>" + escape(str(mail.get("to", ""))) +
+                            "</td><td>" + escape(str(mail.get("subject", ""))) +
+                            "</td><td>" + escape(str(mail.get("at", ""))) + "</td></tr>")
+            st.markdown(
+                '<div style="overflow-x:auto;border:1px solid #e7e2f1;border-radius:12px;background:white">'
+                '<table style="width:100%;border-collapse:collapse;text-align:left">'
+                '<thead style="background:#f3effc"><tr><th style="padding:12px">받는 사람</th>'
+                '<th style="padding:12px">제목</th><th style="padding:12px">발송 시각</th></tr></thead>'
+                '<tbody>' + "".join(rows) + '</tbody></table></div>'
+                '<style>tbody td{padding:12px;border-top:1px solid #eeeaf4;overflow-wrap:anywhere}</style>',
+                unsafe_allow_html=True)
         else:
             st.info("현재 세션의 발송 이력이 없어.")
 
