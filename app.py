@@ -26,9 +26,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
-from docx import Document
 from openai import OpenAI
-from pypdf import PdfReader
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -74,6 +72,7 @@ def init_state():
 
 def new_chat():
     st.session_state.messages = []
+    st.session_state.email_drafts = []
     st.session_state.last_audio_hash = ""
     st.session_state.last_audio = b""
     st.session_state.last_audio_text = ""
@@ -128,9 +127,19 @@ def extract_text(name, data):
         if ext in ("txt", "md", "csv"):
             return data.decode("utf-8-sig", errors="replace")[:40000]
         if ext == "pdf":
+            try:
+                from pypdf import PdfReader
+            except ImportError:
+                st.warning("이 파일의 텍스트 추출은 TXT 변환 후 이용해 주세요.")
+                return ""
             pdf = PdfReader(io.BytesIO(data))
             return "\n".join((p.extract_text() or "") for p in pdf.pages[:40])[:40000]
         if ext == "docx":
+            try:
+                from docx import Document
+            except ImportError:
+                st.warning("이 파일의 텍스트 추출은 TXT 변환 후 이용해 주세요.")
+                return ""
             doc = Document(io.BytesIO(data))
             return "\n".join(p.text for p in doc.paragraphs)[:40000]
     except Exception:
@@ -225,15 +234,81 @@ def maybe_schedule_from_message(message, api):
 
 
 def speak(api, answer):
+    import wave
     try:
-        sound = api.audio.speech.create(model="gpt-4o-mini-tts", voice=st.session_state.voice,
-                                         input=answer[:3500], response_format="mp3")
-        st.session_state.last_audio = sound.content
+        clean = re.sub(r"(?m)^[ \\t]*\\d+[.)][ \\t]+", "", answer)
+        clean = re.sub(r"(?m)^[ \\t]*(?:#{1,6}|[-*•])[ \\t]+", "", clean)
+        clean = clean.replace("**", "").replace("`", "")
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as combined:
+            for start in range(0, len(clean), 1000):
+                sound = api.audio.speech.create(model="gpt-4o-mini-tts", voice=st.session_state.voice,
+                                               input=clean[start:start+1000], response_format="wav")
+                with wave.open(io.BytesIO(sound.content), "rb") as part:
+                    if start == 0:
+                        combined.setnchannels(part.getnchannels())
+                        combined.setsampwidth(part.getsampwidth())
+                        combined.setframerate(part.getframerate())
+                    combined.writeframes(part.readframes(part.getnframes()))
+        st.session_state.last_audio = buffer.getvalue()
         st.session_state.last_audio_text = answer
-        st.caption("음성은 AI가 생성한 합성 음성이야.")
-        st.audio(sound.content, format="audio/mp3", autoplay=True)
+        st.caption("AI가 생성한 합성 음성입니다.")
+        st.audio(st.session_state.last_audio, format="audio/wav", autoplay=True)
     except Exception:
-        st.info("음성 재생에 실패했어. 텍스트 답변은 정상적으로 확인할 수 있어.")
+        st.info("음성 생성에 실패했습니다. 글자 답변을 확인해 주세요.")
+
+EMAIL_TOOL = {"type":"function","function":{"name":"prepare_email","description":"사용자가 이메일 발송을 명시적으로 요청하면 초안을 준비합니다. 실제 발송은 확인 버튼으로만 합니다.","parameters":{"type":"object","properties":{"to":{"type":"string"},"subject":{"type":"string"},"body":{"type":"string"}},"required":["to","subject","body"],"additionalProperties":False}}}
+
+def tool_reply(api, messages):
+    messages = list(messages)
+    messages[0] = dict(messages[0])
+    messages[0]["content"] += "\n당신은 김 대리의 개인비서 에이블입니다. 이메일 발송 요청에만 prepare_email을 사용하세요. 발송하지 말라는 요청은 호출하지 마세요. 도구는 초안만 준비하며 발송 완료라고 말하면 안 됩니다. 기본 수신자: " + str(email_setting("EMAIL_ADDRESS"))
+    planned = api.chat.completions.create(model=MODEL_CHOICES[st.session_state.model_label], messages=messages, tools=[EMAIL_TOOL], tool_choice="auto")
+    msg = planned.choices[0].message
+    if not msg.tool_calls:
+        answer = msg.content or ""
+        return st.write_stream(answer[i:i+16] for i in range(0,len(answer),16))
+    messages.append(msg.model_dump(exclude_none=True))
+    for call in msg.tool_calls:
+        result = {"status":"unsupported"}
+        if call.function.name == "prepare_email":
+            mail = json.loads(call.function.arguments)
+            mail["to"] = mail.get("to") or email_setting("EMAIL_ADDRESS")
+            mail.update(id=str(uuid.uuid4()), sent=False)
+            st.session_state.setdefault("email_drafts", []).append(mail)
+            result = {"status":"draft_ready","message":"아직 발송하지 않았습니다. 미리보기에서 확인 후 발송할 수 있습니다."}
+        messages.append({"role":"tool","tool_call_id":call.id,"content":json.dumps(result,ensure_ascii=False)})
+    stream = api.chat.completions.create(model=MODEL_CHOICES[st.session_state.model_label], messages=messages, stream=True)
+    def pieces():
+        for chunk in stream:
+            if chunk.choices:
+                yield chunk.choices[0].delta.content or ""
+    return st.write_stream(pieces())
+
+def email_previews(prefix):
+    for mail in st.session_state.get("email_drafts", []):
+        with st.expander("✉️ 이메일 미리보기 · " + mail.get("subject",""), expanded=not mail.get("sent")):
+            if mail.get("sent"):
+                st.success("발송 완료")
+                continue
+            with st.form(prefix + mail["id"]):
+                to = st.text_input("받는 사람", value=mail.get("to",""))
+                subject = st.text_input("제목", value=mail.get("subject",""))
+                body = st.text_area("본문", value=mail.get("body",""), height=180)
+                send = st.form_submit_button("내용 확인 후 발송")
+            if send:
+                if not to.strip() or not subject.strip() or not body.strip():
+                    st.error("받는 사람·제목·본문을 확인해 주세요.")
+                elif not safe_email():
+                    st.warning("Streamlit Secrets의 APP_ACCESS_PIN과 이메일 설정이 필요합니다.")
+                else:
+                    try:
+                        send_mail(to.strip(),subject,body)
+                        mail.update(to=to.strip(),subject=subject,body=body,sent=True)
+                        st.session_state.email_log.append({"to":to,"subject":subject,"at":str(now())})
+                        st.rerun()
+                    except Exception:
+                        st.error("이메일 발송 실패. 설정과 연결을 확인해 주세요.")
 
 
 def run_chat(prompt, api):
@@ -257,13 +332,7 @@ def run_chat(prompt, api):
             status.update(label="AI 응답 생성 중", state="running")
             try:
                 messages = build_messages(prompt)
-                stream = api.chat.completions.create(model=MODEL_CHOICES[st.session_state.model_label],
-                                                      messages=messages, stream=True)
-                def pieces():
-                    for chunk in stream:
-                        if chunk.choices:
-                            yield chunk.choices[0].delta.content or ""
-                answer = st.write_stream(pieces())
+                answer = tool_reply(api, messages)
                 if not isinstance(answer, str):
                     answer = str(answer)
                 status.update(label="응답 완료", state="complete")
@@ -387,9 +456,10 @@ def page_chat(api):
     if prompt:
         st.session_state.pending_prompt = ""
         run_chat(prompt, api)
+    email_previews("chat_")
     if st.session_state.last_audio:
         with st.expander("🔊 최근 음성 답변 다시 듣기"):
-            st.audio(st.session_state.last_audio, format="audio/mp3")
+            st.audio(st.session_state.last_audio, format="audio/wav")
             st.caption("AI가 생성한 합성 음성이야.")
 
 
@@ -546,6 +616,7 @@ def page_email():
     if not safe_email():
         st.warning("이메일은 아직 연결되지 않았어. APP_ACCESS_PIN, EMAIL_ADDRESS, EMAIL_APP_PASSWORD를 Streamlit Secrets에 설정해야 해.")
         return
+    email_previews("manage_")
     write, inbox, log = st.tabs(["이메일 작성·발송", "받은편지함", "발송 이력"])
     with write:
         to = st.text_input("받는 사람 이메일")
@@ -596,7 +667,6 @@ def page_settings():
 
 
 def app():
-    st.set_page_config(page_title="에이블 | AI 개인비서", page_icon="🤖", layout="wide", initial_sidebar_state="expanded")
     st.markdown("""<style>
         :root {--able-blue:#2563eb;}
         .block-container {padding-top:1.4rem;padding-bottom:3rem;max-width:1450px;}
@@ -652,5 +722,7 @@ def app():
         page_settings()
 
 
+
 if __name__ == "__main__":
+    st.set_page_config(page_title="에이블 | AI 개인비서", page_icon="🤖", layout="wide")
     app()
