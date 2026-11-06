@@ -12,7 +12,7 @@ def create_movie_chain():
     messages = [("system", s_msg), ("human", h_msg)]
     prompt = ChatPromptTemplate.from_messages(messages)
 
-    llm = ChatOpenAI(model="gpt-6-luna", temperature=0.7)
+    llm = ChatOpenAI(model="gpt-6-luna")
     return prompt | llm
 
 # Streamlit UI
