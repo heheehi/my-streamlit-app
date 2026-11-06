@@ -7,12 +7,12 @@ from langchain_core.prompts import ChatPromptTemplate
 # 체인 생성 캐싱
 @st.cache_resource
 def create_movie_chain():
-    s_msg = "당신은 영화 전문가입니다. 사용자가 원하는 장르의 최신 영화를 추천합니다."
-    h_msg = "{genre} 장르의 최신 영화를 추천하고 추천 이유를 알려주세요."
+    s_msg = "당신은 명작 영화를 추천하는 영화 전문가입니다."
+    h_msg = "{genre} 영화 중 명작을 추천하고, 영화 제목, 개봉 연도, 추천 이유를 설명하세요."
     messages = [("system", s_msg), ("human", h_msg)]
     prompt = ChatPromptTemplate.from_messages(messages)
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+    llm = ChatOpenAI(model="gpt-6-luna", temperature=0.7)
     return prompt | llm
 
 # Streamlit UI
