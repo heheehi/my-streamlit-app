@@ -24,7 +24,7 @@ def get_chain():
     ]
     messages = [("system", s_msg), ("human", h_msg)]
     prompt = ChatPromptTemplate.from_messages(messages)
-    llm = ChatOpenAI(model="gpt-4o-mini")
+    llm = ChatOpenAI(model="gpt-6-luna")
     return prompt | llm
 
 # Streamlit UI
