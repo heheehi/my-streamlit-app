@@ -19,6 +19,19 @@ class DocumentError(ValueError):
     """화면에 표시할 수 있는 문서 오류."""
 
 
+def is_contents_page(text):
+    # 본문에 '목차'라는 말이 나오는 것만으로 제외하지 않습니다.
+    # 여러 제목 뒤에 점선과 쪽수가 반복되는 실제 목차만 구분합니다.
+    return len(re.findall(r"[.·…．]{4,}\s*\d+", text)) >= 3
+
+
+def search_query(question):
+    # 짧은 일상 표현을 문서에서 쓰는 용어와 연결합니다. 답변 질문은 그대로 유지합니다.
+    if re.search(r"(선발|지원|입학|입교|모집)\s*(조건|자격|요건)", question):
+        return question + " 지원 자격 지원 요건 선발 기준"
+    return question
+
+
 def load_documents(data, filename):
     """PDF는 페이지별로 읽고, TXT에는 가짜 쪽수를 붙이지 않습니다."""
     if not data:
@@ -56,10 +69,10 @@ def load_documents(data, filename):
             raise DocumentError("PDF를 읽지 못했습니다. 파일 손상 여부와 PDF 형식을 확인해 주세요.") from None
     else:
         raise DocumentError("PDF 또는 TXT 파일만 사용할 수 있습니다.")
-    docs = [d for d in docs if d.page_content.strip()]
+    docs = [d for d in docs if d.page_content.strip() and not is_contents_page(d.page_content)]
     if not docs:
         raise DocumentError("문서에 읽을 수 있는 텍스트가 없습니다.")
-    return RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100).split_documents(docs)
+    return RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=200).split_documents(docs)
 
 
 def source_label(doc):
@@ -73,7 +86,7 @@ def source_label(doc):
 
 def format_docs(docs):
     return "\n\n".join(
-        f"[근거 {i}] {source_label(doc)}\n{doc.page_content}"
+        f"[근거 {i}] [출처: {source_label(doc)}]\n{doc.page_content}"
         for i, doc in enumerate(docs, 1)
     )
 
@@ -134,7 +147,7 @@ class RAGPipeline:
 
         # 검색은 한 번만 수행하고 같은 문서 목록을 답변과 화면에 반환합니다.
         self.rag_chain = (
-            RunnablePassthrough.assign(sources=RunnableLambda(lambda v: self.retriever.invoke(v["input"])))
+            RunnablePassthrough.assign(sources=RunnableLambda(lambda v: self.retriever.invoke(search_query(v["input"]))))
             | RunnablePassthrough.assign(answer=RunnableLambda(answer))
         )
 

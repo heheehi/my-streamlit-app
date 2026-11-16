@@ -3,6 +3,10 @@ import hashlib
 import streamlit as st
 from rag_core import rag_pipeline, source_label, user_error
 
+LOGO_URL = "https://raw.githubusercontent.com/Jangrae/img/master/aivle.png"
+# 검색 방식이 바뀐 배포에서는 이전 세션의 검색 자료를 다시 준비합니다.
+INDEX_VERSION = "1200-200-body-v2"
+
 
 st.set_page_config(page_title="AIVLE School 학습 도우미", page_icon="📖", layout="centered")
 st.markdown("""<style>
@@ -38,6 +42,7 @@ def get_setting(name):
         return ""
 
 
+st.image(LOGO_URL, width=220)
 st.caption("AIVLE SCHOOL · LEARNING COMPANION")
 st.title("문서에서 찾고, 배움으로 이어가요")
 st.write("백서와 학습 자료를 바탕으로 궁금한 내용을 함께 살펴보세요.")
@@ -45,13 +50,14 @@ st.caption("대화 기록은 현재 세션의 화면에만 저장됩니다. 모�
            "이전 대화를 기억하지 않습니다. 필요한 조건을 질문에 함께 적어 주세요.")
 
 with st.sidebar:
+    st.image(LOGO_URL, width=180)
     st.markdown("### 문서 설정")
     uploaded = st.file_uploader("PDF 또는 TXT 업로드", type=["pdf", "txt"])
     st.caption("텍스트가 있는 PDF와 UTF-8·CP949 TXT를 지원합니다. "
                "문서가 바뀌면 대화와 추천 질문이 초기화됩니다.")
 
 data = uploaded.getvalue() if uploaded is not None else None
-signature = hashlib.sha256(uploaded.name.encode("utf-8") + b"\0" + data).hexdigest() if uploaded else None
+signature = hashlib.sha256(INDEX_VERSION.encode() + uploaded.name.encode("utf-8") + b"\0" + data).hexdigest() if uploaded else None
 if signature != s.signature:
     reset_document(signature)
 
