@@ -116,7 +116,7 @@ def hero(kicker, title, subtitle):
 def campus_art():
     # 확대해도 선명한 벡터 캠퍼스: 외부 이미지 생성 API가 필요 없습니다.
     svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 360"><rect width="820" height="360" rx="24" fill="#e8f3cf"/><circle cx="700" cy="52" r="32" fill="#ffdc78"/><path d="M0 315Q180 100 390 245T820 170" stroke="#fff2bd" stroke-width="65" fill="none"/><path d="M400 360L380 200L510 80" stroke="#fff2bd" stroke-width="45" fill="none"/>'
-    for x, y, color, label in [(110, 235, "#e7be7a", "입교 안내소"), (350, 130, "#d3b78e", "학습 도서관"), (635, 165, "#69bfb8", "프로젝트 랩"), (600, 280, "#bda8dc", "커리어 센터")]:
+    for x, y, color, label in [(110, 235, "#e7be7a", "입교 안내소"), (350, 130, "#d3b78e", "학습 도서관"), (635, 165, "#69bfb8", "프로젝트 랩"), (490, 280, "#bda8dc", "커리어 센터")]:
         svg += f'<g transform="translate({x-65},{y-80})"><path d="M0 20L65 0L145 25L80 48Z" fill="{color}"/><path d="M0 20V90L80 120V48Z" fill="#fff6da"/><path d="M80 48V120L145 92V25Z" fill="{color}"/>'
         for a in (15, 42):
             svg += f'<path d="M{a} 45v25l17 6V51Z" fill="#7ec4c4"/>'
