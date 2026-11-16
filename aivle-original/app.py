@@ -87,6 +87,10 @@ def save_memo():
     s.memo = s.memo_input
 
 
+def save_topic():
+    s.topic = s.topic_widget
+
+
 def sources_panel(docs):
     if docs:
         with st.expander("백서 근거 보기"):
@@ -173,6 +177,7 @@ if "go_page" in s:
     s.page = s.pop("go_page")
 if "go_topic" in s:
     s.topic = s.pop("go_topic")
+    s.pop("topic_widget", None)
 if "import_memo" in s:
     s.memo = s.pop("import_memo")
     s.pop("memo_input", None)
@@ -298,7 +303,9 @@ else:
     topics, conversation, references = st.columns([0.75, 2.25, 1.1], gap="large")
     with topics:
         st.subheader("대화 주제")
-        st.radio("주제 선택", ["전체", "입교 준비", "공부 고민", "팀 프로젝트", "취업 준비"], key="topic", label_visibility="collapsed")
+        topic_options = ["전체", "입교 준비", "공부 고민", "팀 프로젝트", "취업 준비"]
+        st.radio("주제 선택", topic_options, index=topic_options.index(s.topic), key="topic_widget",
+                 on_change=save_topic, label_visibility="collapsed")
         if st.button("대화 삭제", use_container_width=True):
             s.messages, s.suggestions, s.pending = [], [], None
             s.suggestion_context = s.failed_question = None
