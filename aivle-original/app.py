@@ -269,13 +269,7 @@ elif s.page == "지원 체크리스트":
         if submitted:
             try:
                 with st.spinner("백서의 조건과 대조하고 있어요…"):
-                    query = ("지원 자격 선발 조건 자비부담금 결제금액 국민취업지원제도 1유형 2유형 특정계층 면제. "
-                        "사용자 자기점검: " + json.dumps(profile, ensure_ascii=False) +
-                        "\n각 항목을 충족(자가입력 기준)/미충족/추가 확인으로 표에 정리하세요. 미확인을 충족으로 간주하지 마세요. "
-                        "백서의 적용 기수와 요청 기수가 다르거나 불명이면 명시하세요. 국취제 유형만으로 면제를 확정하지 말고 증빙·공식 조건을 확인하세요. "
-                        "백서에 정확한 개인 결제금액이 없으면 임의 금액·비율 계산을 하지 말고 확인 불가라고 쓰세요. 사용자 입력 금액은 본인 입력값으로 구분하세요. "
-                        "최종 합격·행정 판정은 하지 마세요.")
-                    s.assessment = s.pipeline.invoke({"input": query})
+                    s.assessment = s.pipeline.check_application(profile)
                     s.assessment_profile = dict(profile)
             except Exception as error:
                 st.error(user_error(error))
@@ -283,6 +277,12 @@ elif s.page == "지원 체크리스트":
             with st.container(border=True):
                 st.subheader("백서 기반 점검 결과")
                 st.caption("마지막 제출 기준입니다. 값을 바꾸면 다시 확인해 주세요.")
+                submitted_profile = s.assessment_profile or {}
+                status_names = {"충족": "충족 (자가입력)", "미충족": "미충족 (자가입력)", "미확인": "추가 확인"}
+                st.table([{"점검 항목": key, "자기점검 상태": status_names[value]}
+                          for key, value in submitted_profile.items() if value in status_names])
+                entered_fee = submitted_profile.get("공식 과정 상세의 본인 결제금액", "미확인")
+                st.write("본인 입력 결제금액: " + (entered_fee + "원 (미검증)" if entered_fee != "미확인" else "미확인 · 고용24 과정 상세에서 확인"))
                 st.markdown(s.assessment["answer"])
                 sources_panel(s.assessment["sources"])
     with right:

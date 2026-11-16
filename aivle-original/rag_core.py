@@ -134,6 +134,17 @@ class RAGPipeline:
         ])
         answer_chain = prompt | self.llm | StrOutputParser()
 
+        def retrieve_once(values):
+            found = self.retriever.invoke(values.get("query", search_query(values["input"])))
+            # '그 방법'처럼 앞선 답변을 가리키면 이전에 실제 검색했던 근거도 이어 봅니다.
+            # 신규 검색은 한 번이며, 최종 4개 근거를 답변과 화면이 함께 사용합니다.
+            combined = list(values.get("carry_sources", [])) + found
+            unique = {}
+            for doc in combined:
+                key = (doc.metadata.get("source"), doc.metadata.get("page"), doc.page_content)
+                unique.setdefault(key, doc)
+            return list(unique.values())[:4]
+
         def answer(values):
             docs = values["sources"]
             if not docs:
@@ -150,13 +161,16 @@ class RAGPipeline:
 
         # 검색은 한 번만 수행하고 같은 문서 목록을 답변과 화면에 반환합니다.
         self.rag_chain = (
-            RunnablePassthrough.assign(sources=RunnableLambda(lambda v: self.retriever.invoke(v.get("query", search_query(v["input"])))))
+            RunnablePassthrough.assign(sources=RunnableLambda(retrieve_once))
             | RunnablePassthrough.assign(answer=RunnableLambda(answer))
         )
 
     def invoke(self, values):
         values = dict(values)
         history = values.get("history", [])[-12:]
+        if re.search(r"그중|그것|그걸|그 방법|이 방법|두 번째|첫 번째|세 번째|앞서|이어서", values["input"]):
+            latest = next((m for m in reversed(history) if m.get("sources")), {})
+            values["carry_sources"] = latest.get("sources", [])[:2]
         # 과거 답변의 근거 번호를 이번 검색의 번호로 오인하지 않도록 지웁니다.
         values["history"] = [(m["role"], re.sub(r"\[근거\s+\d+\]", "", m["content"])[:2400])
                              for m in history if m.get("role") in ("user", "assistant")]
@@ -200,6 +214,25 @@ class RAGPipeline:
         if not isinstance(actions, list) or any(not isinstance(a, str) for a in actions):
             raise DocumentError("추천 활동을 정리하지 못했습니다. 다시 시도해 주세요.")
         return [a.strip()[:180] for a in actions[:3] if a.strip()]
+
+    def check_application(self, profile):
+        # 입력 상태와 규정 검색을 분리해 긴 체크리스트가 검색어를 흐리지 않게 합니다.
+        docs = self.retriever.invoke("지원 자격 연령 학력 고용보험 내일배움카드 자비부담금 국민취업지원제도 면제")
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", SYSTEM_PROMPT + "\n" + CITATION_RULES + "\n지원 자기점검 모드입니다. "
+             "사용자 입력이 미확인인 것은 문서 근거가 없는 것과 다릅니다. 참고 자료의 규정을 먼저 설명하고 "
+             "미확인 항목은 추가 확인으로 표시하세요. 해당 기수에 맞는 규정인지 구분하고 최종 합격 판정은 하지 마세요. "
+             "국취제 2유형 전체를 면제라고 일반화하지 마세요. 개인 금액이 문서에 없으면 임의 금액·비율 계산을 하지 마세요. "
+             "미확인을 충족으로 간주하지 마세요. 가능한 부분의 설명까지 일괄 거부하지 마세요."),
+            ("human", "자가입력: {profile}\n지원 요건과 자비부담금·면제 여부를 확인하는 데 필요한 조건을 "
+             "항목별로 설명하고, 확인할 곳과 다음 행동을 안내하세요. 각 문서 규정 뒤에 [근거 n]을 붙이세요. "
+             "사용자 입력 결제금액은 검증된 값으로 취급하지 마세요.")])
+        answer = (prompt | self.llm | StrOutputParser()).invoke({
+            "context": format_docs(docs), "profile": json.dumps(profile, ensure_ascii=False)})
+        numbers = [int(n) for n in re.findall(r"\[근거\s+(\d+)\]", answer)]
+        if not numbers or any(n < 1 or n > len(docs) for n in numbers):
+            answer = "검증 가능한 규정 설명을 만들지 못했습니다. 아래 검색 근거와 공식 공고를 확인해 주세요."
+        return {"answer": answer, "sources": docs}
 
     def close(self):
         # 이 인스턴스가 만든 컬렉션만 정리합니다. reset_collection은 사용하지 않습니다.
@@ -376,6 +409,7 @@ SYSTEM_PROMPT = """
 NO_EVIDENCE = "제공된 백서에서 해당 내용을 확인할 수 없습니다."
 CITATION_RULES = """
 핵심 사실 주장 뒤에 반드시 [근거 1]처럼 실제 검색 자료의 번호를 표시하세요.
+학습 계획이나 실천 제안에도 바탕이 된 [근거 n]을 함께 표시하고, 제안임을 밝혀 주세요.
 파일명과 PDF 쪽수는 제공된 메타데이터만 사용하세요. 관련 근거가 없으면 지정된 확인 불가 문장만 답하세요.
 학습 조언에는 작은 실천을 격려하는 표현을 더하되 성과를 보장하지 마세요.
 """
