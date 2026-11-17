@@ -24,13 +24,17 @@ class DocumentError(ValueError):
 def is_contents_page(text):
     # 본문에 '목차'라는 말이 나오는 것만으로 제외하지 않습니다.
     # 여러 제목 뒤에 점선과 쪽수가 반복되는 실제 목차만 구분합니다.
-    return len(re.findall(r"[.·…．]{4,}\s*\d+", text)) >= 3
+    leaders = len(re.findall(r"(?:[.·…．]\s*){4,}\d+", text))
+    numbered = len(re.findall(r"(?m)^\s*\d+(?:\.\d+)*[.)]?\s+[^\n]{2,100}?\s+\d+\s*$", text))
+    return leaders >= 2 or (bool(re.search(r"목\s*차|C\s*O\s*N\s*T\s*E\s*N\s*T\s*S", text, re.I)) and numbered >= 3)
 
 
 def search_query(question):
     # 한글·영문 표현을 함께 찾아 검색 누락을 줄입니다.
     if re.search(r"파이썬|python", question, re.I):
         question += " Python 파이썬 기초 문법 변수 조건문 반복문 함수 입교 준비"
+    if re.search(r"입교\s*전|입과\s*전|입교.*준비", question):
+        question += " 입교 전 체크리스트 사전 준비 학습 기초 파이썬 학사 일정"
     # 짧은 일상 표현을 문서에서 쓰는 용어와 연결합니다. 답변 질문은 그대로 유지합니다.
     if re.search(r"(선발|지원|입학|입교|모집)\s*(조건|자격|요건)", question):
         return question + " 지원 자격 지원 요건 선발 기준"
@@ -172,6 +176,8 @@ def load_documents(data, filename):
                 if pdf.needs_pass:
                     raise DocumentError("암호 PDF입니다. 암호를 해제한 파일을 올려 주세요.")
                 text_pages = {i for i, page in enumerate(pdf) if page.get_text().strip()}
+                # 로더가 점선을 변환하기 전, PDF 원문의 실제 목차 페이지를 먼저 제외합니다.
+                contents_pages = {i for i, page in enumerate(pdf) if is_contents_page(page.get_text())}
                 if not text_pages:
                     raise DocumentError("추출할 텍스트가 없습니다. 스캔 PDF는 OCR 처리 후 올려 주세요.")
             with tempfile.TemporaryDirectory(prefix="aivle_pdf_") as folder:
@@ -182,7 +188,7 @@ def load_documents(data, filename):
             # 로더의 page는 0부터 시작하므로 실제 PDF 순서로 1을 더합니다.
             docs = [Document(page_content=d.page_content, metadata={
                 "source": filename, "page": int(d.metadata["page"]) + 1
-            }) for d in docs if d.metadata.get("page") in text_pages]
+            }) for d in docs if d.metadata.get("page") in text_pages - contents_pages]
         except DocumentError:
             raise
         except Exception:
@@ -280,7 +286,7 @@ class RAGPipeline:
             result, seen = [], set()
             for doc in combined:
                 identifier = key(doc)
-                if identifier not in seen:
+                if identifier not in seen and not is_contents_page(doc.page_content):
                     result.append(doc)
                     seen.add(identifier)
             return result[:6]
@@ -381,7 +387,7 @@ class RAGPipeline:
 
     def check_application(self, profile):
         # 입력 상태와 규정 검색을 분리해 긴 체크리스트가 검색어를 흐리지 않게 합니다.
-        groups = [self.retriever.invoke(query) for query in (
+        groups = [[d for d in self.retriever.invoke(query) if not is_contents_page(d.page_content)] for query in (
             "지원 자격 연령 학력 미취업 교육 시간 내일배움카드 K-DT 수강",
             "교육비 자비부담금 국민취업지원제도 1유형 2유형 특정계층 면제 결제")]
         # 자격과 비용을 각각 검색해 한 주제에 치우치지 않게 최대 4개를 합칩니다.
@@ -599,4 +605,8 @@ CITATION_RULES = """
 학습 계획이나 실천 제안에도 바탕이 된 [근거 n]을 함께 표시하고, 제안임을 밝혀 주세요.
 파일명과 PDF 쪽수는 제공된 메타데이터만 사용하세요. 관련 근거가 없으면 지정된 확인 불가 문장만 답하세요.
 학습 조언에는 작은 실천을 격려하는 표현을 더하되 성과를 보장하지 마세요.
+목차의 제목과 쪽수는 본문 내용의 근거로 쓰지 마세요. 확인할 수 있는 본문부터 설명하고 확인되지 않는 부분만 구분하세요.
+따뜻하고 차분한 선배의 말투로 답하세요. 짧은 핵심 답변 뒤에 필요한 실천을 2~4개로 정리하고 근거를 붙이세요.
+학습·준비 조언의 끝에는 '처음부터 다 해내려고 하지 않아도 괜찮아요. 오늘 할 수 있는 한 가지부터 함께 시작해 봐요.'처럼 상황에 맞는 격려를 한 문장 더하세요.
+지원 자격·비용 등 사실 확인 답변에는 억지로 격려를 붙이지 마세요. 근거 없는 확신, 성공 보장, 확인 가능·불가가 모순되는 문장은 피하세요.
 """

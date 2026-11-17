@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import hmac
 import html
 import json
 from datetime import datetime
@@ -10,7 +11,7 @@ import streamlit as st
 from rag_core import rag_pipeline, source_label, user_error, check_training_card, CARD_RULE_URL, CARD_RULE_DATE
 
 LOGO_URL = "https://raw.githubusercontent.com/Jangrae/img/master/aivle.png"
-INDEX_VERSION = "1200-200-body-v6-hybrid"
+INDEX_VERSION = "1200-200-body-v7-warm"
 st.set_page_config(page_title="AIVLE MATE · 나의 학습 캠퍼스", page_icon="🌿", layout="wide")
 
 FAQ = {
@@ -72,7 +73,9 @@ def record_data(entry):
 
 
 def store_bookmark(entry):
-    if not any(item["id"] == entry["id"] for item in s.bookmarks):
+    if any(item["id"] == entry["id"] for item in s.bookmarks):
+        remove_bookmark(entry["id"])
+    else:
         s.bookmarks.append(dict(entry))
 
 
@@ -90,7 +93,7 @@ def bookmark_button(message, question, prefix):
              "sources": message.get("sources", []), "time": message["time"],
              "doc_name": message["doc_name"], "profile": message["profile"]}
     saved = any(item["id"] == entry["id"] for item in s.bookmarks)
-    st.button("✓ 저장한 답변" if saved else "☆ 답변 저장", key=prefix + entry["id"], disabled=saved,
+    st.button("✓ 저장한 답변 · 취소" if saved else "☆ 답변 저장", key=prefix + entry["id"],
               on_click=store_bookmark, args=(entry,))
 
 
@@ -151,6 +154,32 @@ def add_task(text, source="직접 작성"):
 def remove_task(task_id):
     s.tasks = [t for t in s.tasks if t["id"] != task_id]
     s.pop("task_" + task_id, None)
+
+
+def toggle_activity(text, source):
+    existing = next((t for t in s.tasks if t["text"] == text), None)
+    if existing:
+        remove_task(existing["id"])
+    else:
+        add_task(text, source)
+
+
+def newest_turns(messages):
+    # 모델 기억과 다운로드는 시간순을 유지하고, 화면만 질문·답변 묶음의 최신순으로 표시합니다.
+    turns = []
+    for i, message in enumerate(messages):
+        if message["role"] == "user" or not turns:
+            turns.append([])
+        turns[-1].append((i, message))
+    return [pair for turn in reversed(turns) for pair in turn]
+
+
+def admin_login():
+    expected = setting("ADMIN_PASSWORD")
+    entered = s.get("admin_password_input", "")
+    s.admin_password_input = ""
+    s.admin_digest = hashlib.sha256(expected.encode()).hexdigest() if expected and hmac.compare_digest(entered.encode(), expected.encode()) else ""
+    s.admin_error = not bool(s.admin_digest)
 
 
 def save_memo():
@@ -234,6 +263,29 @@ with st.sidebar:
         st.link_button("잡다 역량검사 ↗", "https://www.jobda.im/acca/introduce")
         st.link_button("잡다 역량검사 연습 ↗", "https://www.jobda.im/acc/tutorial")
         st.link_button("고용24 ↗", "https://www.work24.go.kr/")
+    with st.expander("🔒 관리자 영역"):
+        expected = setting("ADMIN_PASSWORD")
+        if not expected:
+            st.caption("Streamlit Secrets에 ADMIN_PASSWORD를 설정하면 사용할 수 있어요.")
+        elif not hmac.compare_digest(s.get("admin_digest", ""), hashlib.sha256(expected.encode()).hexdigest()):
+            with st.form("admin_login"):
+                st.text_input("관리자 비밀번호", type="password", key="admin_password_input")
+                st.form_submit_button("관리자 로그인", on_click=admin_login)
+            if s.get("admin_error"):
+                st.error("비밀번호를 확인해 주세요.")
+        else:
+            st.caption("현재 접속 세션의 문서 관리")
+            st.write("문서: " + (s.active_file["name"] if s.active_file else "없음"))
+            st.write(f"본문 조각 {len(s.pipeline.documents) if s.pipeline else 0}개 · 대화 {sum(m['role'] == 'user' for m in s.messages)}개")
+            st.write("검색 자료 준비 완료" if s.pipeline else "문서 준비 전")
+            if st.button("현재 문서 검색 자료 다시 준비", disabled=not s.active_file):
+                reset_document(s.signature)
+                st.rerun()
+            st.caption("다시 준비하면 현재 문서의 대화와 추천 질문이 초기화됩니다.")
+            if st.button("관리자 로그아웃"):
+                s.admin_digest = ""
+                s.admin_error = False
+                st.rerun()
 
 if s.active_file and s.pipeline is None:
     if not setting("OPENAI_API_KEY"):
@@ -477,7 +529,28 @@ else:
         st.download_button("대화 저장", transcript.encode("utf-8-sig"), "aivle_chat.txt", disabled=not transcript, use_container_width=True)
     with conversation:
         st.subheader("공부 고민, 편하게 물어봐요.")
-        for i, message in enumerate(s.messages):
+        if s.pipeline:
+            if s.suggestion_context != (len(s.messages), s.topic, s.stage, s.track) and not s.suggestion_error:
+                try:
+                    refresh_suggestions()
+                except Exception as error:
+                    s.suggestion_error = user_error(error)
+            for i, question in enumerate(s.suggestions):
+                if st.button(question, key=f"suggestion_{i}", use_container_width=True):
+                    s.pending = question
+                    s.pending_sources = []
+                    st.rerun()
+            if st.button("추천 질문 다시 만들기"):
+                try:
+                    with st.spinner("새로운 질문을 찾고 있어요…"):
+                        refresh_suggestions()
+                    st.rerun()
+                except Exception as error:
+                    s.suggestion_error = user_error(error)
+            if s.suggestion_error:
+                st.warning(s.suggestion_error)
+        st.divider()
+        for i, message in newest_turns(s.messages):
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
                 if message.get("sources"):
@@ -492,8 +565,8 @@ else:
                             st.error(user_error(error))
                     for j, action in enumerate(message.get("actions", [])):
                         saved = any(t["text"] == action for t in s.tasks)
-                        if st.button(("✓ 저장됨 · " if saved else "+ 활동에 추가 · ") + action, key=f"action_{i}_{j}", disabled=saved):
-                            add_task(action, message["content"])
+                        if st.button(("✓ 저장됨 · 취소 · " if saved else "+ 활동에 추가 · ") + action, key=f"action_{i}_{j}"):
+                            toggle_activity(action, message["content"])
                             st.rerun()
         if s.pending and s.pipeline:
             question, s.pending = s.pending, None
@@ -517,26 +590,6 @@ else:
         if s.failed_question and st.button("답변 다시 시도"):
             s.pending, s.failed_question = s.failed_question, None
             st.rerun()
-        if s.pipeline:
-            if s.suggestion_context != (len(s.messages), s.topic, s.stage, s.track) and not s.suggestion_error:
-                try:
-                    refresh_suggestions()
-                except Exception as error:
-                    s.suggestion_error = user_error(error)
-            for i, question in enumerate(s.suggestions):
-                if st.button(question, key=f"suggestion_{i}", use_container_width=True):
-                    s.pending = question
-                    s.pending_sources = []
-                    st.rerun()
-            if st.button("추천 질문 다시 만들기"):
-                try:
-                    with st.spinner("새로운 질문을 찾고 있어요…"):
-                        refresh_suggestions()
-                    st.rerun()
-                except Exception as error:
-                    s.suggestion_error = user_error(error)
-            if s.suggestion_error:
-                st.warning(s.suggestion_error)
         # 입력창에서도 PDF/TXT 파일을 드래그 앤 드롭할 수 있습니다.
         incoming = st.chat_input("질문하거나 PDF · TXT를 놓아 주세요", accept_file=True, file_type=["pdf", "txt"])
         if incoming:
