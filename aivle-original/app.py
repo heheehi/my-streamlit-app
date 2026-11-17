@@ -20,6 +20,13 @@ FAQ = {
     "팀 프로젝트": ["미니프로젝트는 어떻게 준비하면 좋을까요?", "팀의 역할 분담과 협업 방법을 알려 주세요.", "프로젝트에서 나의 기여를 어떻게 정리하면 좋을까요?"],
     "취업 준비": ["관심 트랙의 취업 사례와 준비 방법을 알려 주세요.", "포트폴리오에 어떤 내용을 담으면 좋을까요?", "프로젝트 경험을 자기소개서와 면접에 어떻게 활용하나요?"],
 }
+CHAT_TITLES = {
+    "전체": "궁금한 것부터, 편하게 물어봐요.",
+    "입교 준비": "입교 준비, 함께 시작해요.",
+    "공부 고민": "공부 고민, 편하게 물어봐요.",
+    "팀 프로젝트": "팀 프로젝트, 함께 풀어봐요.",
+    "취업 준비": "취업 준비, 차근차근 해봐요.",
+}
 st.markdown("""<style>
 .stApp{background:linear-gradient(140deg,#f5faf8,#fffaf2 48%,#f5f2ff);color:#18213d;}
 .block-container{max-width:1350px;padding-top:5.5rem;padding-bottom:3rem;}
@@ -52,7 +59,8 @@ DEFAULTS = {"pipeline": None, "messages": [], "signature": None, "suggestions": 
             "tasks": [], "memo": "", "assessment": None, "assessment_profile": None,
             "page": "캠퍼스", "topic": "전체", "upload_epoch": 0, "suggestion_context": None,
             "stage": "교육 중", "track": "공통", "bookmarks": [], "faq_topic": "공부 고민",
-            "pending_sources": [], "card_result": None}
+            "pending_sources": [], "card_result": None, "faq_answers": {},
+            "faq_selected": None, "faq_pending": None, "faq_error": None}
 for key, value in DEFAULTS.items():
     st.session_state.setdefault(key, value)
 s = st.session_state
@@ -112,6 +120,7 @@ def reset_document(signature):
     s.document_error = s.suggestion_error = s.pending = s.assessment = None
     s.failed_question = s.suggestion_context = None
     s.pending_sources, s.card_result = [], None
+    s.faq_answers, s.faq_selected, s.faq_pending, s.faq_error = {}, None, None, None
     s.suggestion_round = 0
 
 
@@ -345,11 +354,41 @@ if s.page == "캠퍼스":
 elif s.page == "주제별 FAQ":
     hero("AIVLE MATE · FAQ", "궁금한 주제부터 골라요.", "질문을 선택하면 지금 올린 백서에서 답을 찾습니다")
     topic = st.selectbox("FAQ 주제", list(FAQ), key="faq_topic")
+    # FAQ는 별도 대화로 처리하고, 문서·학습 설정이 같으면 준비한 답변을 재사용합니다.
+    scope = (s.signature, s.stage, s.track, topic)
     for i, question in enumerate(FAQ[topic]):
         if st.button(question, key=f"faq_{i}", disabled=s.pipeline is None, use_container_width=True):
-            navigate("질문하기", topic, question)
+            selected = (*scope, question)
+            s.faq_selected, s.faq_error = selected, None
+            s.faq_pending = selected if selected not in s.faq_answers else None
+            st.rerun()
     if s.pipeline is None:
         st.info("백서를 올리면 주제별 질문을 시작할 수 있어요.")
+    elif s.faq_selected and s.faq_selected[:4] == scope:
+        selected = s.faq_selected
+        question = selected[4]
+        with st.chat_message("user"):
+            st.markdown(question)
+        result = s.faq_answers.get(selected)
+        if result:
+            with st.chat_message("assistant"):
+                st.markdown(result["answer"])
+                sources_panel(result["sources"])
+                bookmark_button(result, question, "faq_save_")
+        elif s.faq_pending == selected:
+            try:
+                with st.spinner("백서에서 함께 찾아보고 있어요…"):
+                    s.faq_answers[selected] = s.pipeline.invoke({"input": question, "profile": learner_profile()})
+                s.faq_pending = None
+                st.rerun()
+            except Exception as error:
+                s.faq_pending = None
+                s.faq_error = user_error(error)
+        if s.faq_error:
+            st.error(s.faq_error)
+            if st.button("FAQ 답변 다시 시도"):
+                s.faq_pending, s.faq_error = selected, None
+                st.rerun()
 
 elif s.page == "백서 살펴보기":
     hero("WHITEPAPER", "백서를 직접 펼쳐보세요.", "전체 검색과 페이지별 원문 열람")
@@ -528,7 +567,7 @@ else:
             "\n".join(f"[근거 {i}] {source_label(d)}\n{d.page_content}" for i, d in enumerate(m.get("sources", []), 1)) for m in s.messages)
         st.download_button("대화 저장", transcript.encode("utf-8-sig"), "aivle_chat.txt", disabled=not transcript, use_container_width=True)
     with conversation:
-        st.subheader("공부 고민, 편하게 물어봐요.")
+        st.subheader(CHAT_TITLES[s.topic])
         if s.pipeline:
             if s.suggestion_context != (len(s.messages), s.topic, s.stage, s.track) and not s.suggestion_error:
                 try:
