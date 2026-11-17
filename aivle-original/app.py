@@ -88,7 +88,7 @@ def learning_text():
 def parse_learning_record(data, filename):
     if filename.lower().endswith(".json"):
         return json.loads(data)
-    text = data.decode("utf-8-sig")
+    text = data.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
     if not text.startswith("AIVLE 학습 기록\n[활동]\n") or "\n[메모]\n" not in text:
         raise ValueError()
     tasks, memo = text[len("AIVLE 학습 기록\n[활동]\n"):].split("\n[메모]\n", 1)
@@ -102,7 +102,8 @@ def saved_answers_text():
     entries = []
     for item in s.bookmarks:
         sources = "\n\n".join(f"[근거 {i}] {source_label(d)}\n{d.page_content}" for i, d in enumerate(item["sources"], 1))
-        entries.append(f"질문: {item['question']}\n저장 시각: {item['time']}\n문서: {item['doc_name']}\n\n{item['content']}\n\n{sources}")
+        profile = ", ".join(f"{k}: {v}" for k, v in item.get("profile", {}).items())
+        entries.append(f"질문: {item['question']}\n저장 시각: {item['time']}\n문서: {item['doc_name']}\n학습 설정: {profile}\n\n{item['content']}\n\n{sources}")
     return "AIVLE 저장한 답변\n\n" + "\n\n".join(entries)
 
 
