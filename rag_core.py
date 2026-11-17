@@ -1,5 +1,6 @@
 import re
 import json
+import math
 import tempfile
 from pathlib import Path
 from uuid import uuid4
@@ -27,6 +28,9 @@ def is_contents_page(text):
 
 
 def search_query(question):
+    # 한글·영문 표현을 함께 찾아 검색 누락을 줄입니다.
+    if re.search(r"파이썬|python", question, re.I):
+        question += " Python 파이썬 기초 문법 변수 조건문 반복문 함수 입교 준비"
     # 짧은 일상 표현을 문서에서 쓰는 용어와 연결합니다. 답변 질문은 그대로 유지합니다.
     if re.search(r"(선발|지원|입학|입교|모집)\s*(조건|자격|요건)", question):
         return question + " 지원 자격 지원 요건 선발 기준"
@@ -243,7 +247,7 @@ class RAGPipeline:
         except Exception:
             self.close()
             raise
-        self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 4})
+        self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 8})
         prompt = ChatPromptTemplate.from_messages([
             ("system", SYSTEM_PROMPT + "\n" + CITATION_RULES),
             MessagesPlaceholder("history", optional=True),
@@ -252,15 +256,34 @@ class RAGPipeline:
         answer_chain = prompt | self.llm | StrOutputParser()
 
         def retrieve_once(values):
-            found = self.retriever.invoke(values.get("query", search_query(values["input"])))
-            # '그 방법'처럼 앞선 답변을 가리키면 이전에 실제 검색했던 근거도 이어 봅니다.
-            # 신규 검색은 한 번이며, 최종 4개 근거를 답변과 화면이 함께 사용합니다.
-            combined = list(values.get("carry_sources", [])) + found
-            unique = {}
+            query = values.get("query", search_query(values["input"]))
+            found = self.retriever.invoke(query)
+            # 의미 검색과 본문 단어 검색을 결합합니다. 추가 API 호출은 없습니다.
+            terms = set(re.findall(r"[가-힣A-Za-z0-9]{2,}", query.lower()))
+            stopwords = {"백서를", "백서", "근거로", "알려", "주세요", "어느", "정도", "어떻게", "무엇", "하면", "좋을까요", "내용", "관심", "트랙"}
+            terms = {re.sub(r"(에서|으로|에게|을|를|은|는|이|가|의)$", "", term) for term in terms - stopwords}
+            terms = {term for term in terms if len(term) >= 2}
+            texts = [doc.page_content.lower() for doc in self.documents]
+            weights = {term: math.log(1 + len(texts) / (1 + sum(term in text for text in texts))) for term in terms}
+            lexical = sorted(zip(self.documents, texts), key=lambda pair: sum(weights[t] * min(pair[1].count(t), 3) for t in terms), reverse=True)
+            lexical = [doc for doc, text in lexical if any(t in text for t in terms)][:8]
+            scores, unique = {}, {}
+            def key(doc):
+                return (doc.metadata.get("source"), doc.metadata.get("page"), doc.page_content)
+            for ranking in (found, lexical):
+                for rank, doc in enumerate(ranking):
+                    identifier = key(doc)
+                    unique[identifier] = doc
+                    scores[identifier] = scores.get(identifier, 0) + 1 / (10 + rank)
+            ranked = [unique[k] for k in sorted(scores, key=scores.get, reverse=True)]
+            combined = list(values.get("carry_sources", []))[:2] + ranked
+            result, seen = [], set()
             for doc in combined:
-                key = (doc.metadata.get("source"), doc.metadata.get("page"), doc.page_content)
-                unique.setdefault(key, doc)
-            return list(unique.values())[:4]
+                identifier = key(doc)
+                if identifier not in seen:
+                    result.append(doc)
+                    seen.add(identifier)
+            return result[:6]
 
         def answer(values):
             docs = values["sources"]
