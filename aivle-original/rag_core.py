@@ -29,6 +29,13 @@ def is_contents_page(text):
     return leaders >= 2 or (bool(re.search(r"목\s*차|C\s*O\s*N\s*T\s*E\s*N\s*T\s*S", text, re.I)) and numbered >= 3)
 
 
+def remove_contents_lines(text):
+    # 재편집한 PDF는 한 페이지에 목차와 본문이 섞일 수 있어 목차 줄만 지웁니다.
+    return "\n".join(line for line in text.splitlines()
+                     if not re.search(r"(?:[.·…．]\s*){4,}", line)
+                     and not re.fullmatch(r"\s*(?:목\s*차|C\s*O\s*N\s*T\s*E\s*N\s*T\s*S)\s*", line, re.I))
+
+
 def search_query(question):
     # 한글·영문 표현을 함께 찾아 검색 누락을 줄입니다.
     if re.search(r"파이썬|python", question, re.I):
@@ -176,8 +183,9 @@ def load_documents(data, filename):
                 if pdf.needs_pass:
                     raise DocumentError("암호 PDF입니다. 암호를 해제한 파일을 올려 주세요.")
                 text_pages = {i for i, page in enumerate(pdf) if page.get_text().strip()}
-                # 로더가 점선을 변환하기 전, PDF 원문의 실제 목차 페이지를 먼저 제외합니다.
-                contents_pages = {i for i, page in enumerate(pdf) if is_contents_page(page.get_text())}
+                # 로더가 점선을 변환하기 전에 목차를 제거하되 같은 페이지의 본문은 살립니다.
+                contents_text = {i: remove_contents_lines(page.get_text()) for i, page in enumerate(pdf)
+                                 if is_contents_page(page.get_text())}
                 if not text_pages:
                     raise DocumentError("추출할 텍스트가 없습니다. 스캔 PDF는 OCR 처리 후 올려 주세요.")
             with tempfile.TemporaryDirectory(prefix="aivle_pdf_") as folder:
@@ -186,16 +194,22 @@ def load_documents(data, filename):
                 # 레이아웃 엔진의 빈 추출·파일 잠금 문제를 피하고 페이지별 텍스트를 읽습니다.
                 docs = PyMuPDF4LLMLoader(str(filepath), mode="page", use_layout=False).load()
             # 로더의 page는 0부터 시작하므로 실제 PDF 순서로 1을 더합니다.
-            docs = [Document(page_content=d.page_content, metadata={
+            docs = [Document(page_content=contents_text.get(d.metadata.get("page"), d.page_content), metadata={
                 "source": filename, "page": int(d.metadata["page"]) + 1
-            }) for d in docs if d.metadata.get("page") in text_pages - contents_pages]
+            }) for d in docs if d.metadata.get("page") in text_pages]
         except DocumentError:
             raise
         except Exception:
             raise DocumentError("PDF를 읽지 못했습니다. 파일 손상 여부와 PDF 형식을 확인해 주세요.") from None
     else:
         raise DocumentError("PDF 또는 TXT 파일만 사용할 수 있습니다.")
-    docs = [d for d in docs if d.page_content.strip() and not is_contents_page(d.page_content)]
+    for doc in docs:
+        doc.page_content = remove_contents_lines(doc.page_content)
+    # 목차 제거 후 원본 쪽 표지만 남은 조각은 검색하지 않습니다.
+    def has_body(doc):
+        body = re.sub(r"(?m)^\s*(?:원본 백서 PDF\s*\d+\s*쪽|AIVLE School 백서|\d+)\s*$", "", doc.page_content)
+        return bool(re.sub(r"\s", "", body))
+    docs = [d for d in docs if has_body(d) and not is_contents_page(d.page_content)]
     if not docs:
         raise DocumentError("문서에 읽을 수 있는 텍스트가 없습니다.")
     return RecursiveCharacterTextSplitter(chunk_size=1200, chunk_overlap=200).split_documents(docs)
@@ -255,7 +269,7 @@ class RAGPipeline:
             raise
         self.retriever = self.vectorstore.as_retriever(search_kwargs={"k": 8})
         prompt = ChatPromptTemplate.from_messages([
-            ("system", SYSTEM_PROMPT + "\n" + CITATION_RULES),
+            ("system", SYSTEM_PROMPT + "\n" + CITATION_RULES + "\n" + SUPPORTIVE_STYLE_PROMPT),
             MessagesPlaceholder("history", optional=True),
             ("human", "{input}")
         ])
@@ -604,11 +618,22 @@ CITATION_RULES = """
 핵심 사실 주장 뒤에 반드시 [근거 1]처럼 실제 검색 자료의 번호를 표시하세요.
 학습 계획이나 실천 제안에도 바탕이 된 [근거 n]을 함께 표시하고, 제안임을 밝혀 주세요.
 파일명과 PDF 쪽수는 제공된 메타데이터만 사용하세요. 관련 근거가 없으면 지정된 확인 불가 문장만 답하세요.
-학습 조언에는 작은 실천을 격려하는 표현을 더하되 성과를 보장하지 마세요.
 목차의 제목과 쪽수는 본문 내용의 근거로 쓰지 마세요. 확인할 수 있는 본문부터 설명하고 확인되지 않는 부분만 구분하세요.
-따뜻하고 차분한 선배의 말투로 답하세요. 짧은 핵심 답변 뒤에 필요한 실천을 2~4개로 정리하고 근거를 붙이세요.
-학습·준비 조언의 끝에는 '처음부터 다 해내려고 하지 않아도 괜찮아요. 오늘 할 수 있는 한 가지부터 함께 시작해 봐요.'처럼 상황에 맞는 격려를 한 문장 더하세요.
-지원 자격·비용 등 사실 확인 답변에는 억지로 격려를 붙이지 마세요. 근거 없는 확신, 성공 보장, 확인 가능·불가가 모순되는 문장은 피하세요.
+본문 속 '원본 백서 PDF n쪽' 표지와 현재 파일의 실제 PDF 쪽수는 다를 수 있습니다. 출처에는 검색 자료의 메타데이터에 있는 실제 PDF 쪽수를 사용하세요.
 파이썬 등 기술 학습 조언은 자료에 나온 학습 항목만 사용하세요. 자료에 없는 라이브러리·API 이름이나 세부 기술 설명을 일반 지식으로 추가하지 마세요.
 백서의 항목을 새 순서나 계획으로 구성하면 먼저 '백서 내용을 바탕으로 한 제안입니다.'라고 밝히세요. 이 경우에도 자료에 없는 학습 항목을 끼워 넣지 마세요.
+"""
+
+# 따뜻한 답변은 화면에서 덧붙이는 고정 문구가 아니라 모델의 시스템 메시지로 전달합니다.
+SUPPORTIVE_STYLE_PROMPT = """
+문서를 기반으로 명확하게 답하면서, 사용자가 작은 도전을 시작하도록 돕는 차분하고 따뜻한 학습 선배입니다.
+불안·자신감·진도 고민에는 짧게 공감하고, 백서에서 확인한 학습 방식·지원·협업 방법을 구체적인 이유로 연결하세요.
+그 이유를 바탕으로 지금 시도할 수 있는 행동 1~2개를 제안하고, 질문이나 도움 요청을 주저하지 않도록 격려하세요.
+공감 → 문서 근거에 따른 설명 → 작은 실천 → 상황에 맞는 응원이 자연스럽게 이어지게 하세요.
+이 네 단계를 제목으로 기계적으로 나열하거나, 모든 답변 끝에 같은 위로 문장을 반복하지 마세요.
+'6개월 과정인데 잘할 수 있을까요?'에는 기간에 대한 부담을 인정한 뒤, 자료에 있는 이론·실습·프로젝트나 동료 협업 등 실제 도움 요소를 설명하고 첫 행동을 함께 제안하세요.
+자료에 없는 지원 제도나 성공 사례를 만들어 응원하지 마세요. 공부 방법의 제안은 문서의 사실과 구분하세요.
+'무조건 해낼 수 있다', '반드시 수료·취업한다'처럼 성과를 보장하거나 사용자의 능력을 단정하지 마세요.
+단순 사실·지원 자격·비용 질문은 정확한 결론을 먼저 설명하고 억지로 응원을 덧붙이지 마세요.
+근거 부족 시에는 원본 시스템 프롬프트의 확인 불가 규칙을 그대로 따르세요.
 """

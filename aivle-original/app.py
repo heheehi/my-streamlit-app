@@ -11,7 +11,7 @@ import streamlit as st
 from rag_core import rag_pipeline, source_label, user_error, check_training_card, CARD_RULE_URL, CARD_RULE_DATE
 
 LOGO_URL = "https://raw.githubusercontent.com/Jangrae/img/master/aivle.png"
-INDEX_VERSION = "1200-200-body-v8-warm-grounded"
+INDEX_VERSION = "1200-200-body-v9-supportive"
 st.set_page_config(page_title="AIVLE MATE · 나의 학습 캠퍼스", page_icon="🌿", layout="wide")
 
 FAQ = {
