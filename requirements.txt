@@ -1,5 +1,11 @@
-streamlit==1.64.0
-langchain-core==1.6.3
-langchain-openai==1.6.2
-langchain-chroma==1.1.0
+streamlit>=1.67,<2
+langchain-core>=1,<2
+langchain-openai>=1,<2
+langchain-text-splitters>=1,<2
+langchain-pymupdf4llm==1.28.0
+pymupdf4llm==1.28.0
+pymupdf>=1.28,<1.29
 chromadb==1.5.9
+langchain-chroma==1.1.0
+# Chroma 의존성: 검증한 호환 버전을 고정합니다. 별도 NumPy 검색은 없습니다.
+numpy==2.2.6
