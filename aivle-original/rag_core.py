@@ -312,16 +312,20 @@ class RAGPipeline:
             question = values["input"]
             if values.get("profile"):
                 question = "사용자 설정(질문 해석용이며 사실의 근거가 아님): " + json.dumps(values["profile"], ensure_ascii=False) + "\n현재 질문: " + question
-            result = answer_chain.invoke({"input": question, "context": format_docs(docs),
-                                          "history": values.get("history", [])})
-            # 존재하지 않는 번호나 출처 없는 단정은 그대로 내보내지 않습니다.
-            result = re.sub(r"\[근거\s*(\d+)\]", r"[근거 \1]", result)
-            numbers = [int(n) for n in re.findall(r"\[근거\s+(\d+)\]", result)]
-            if result.strip() == NO_EVIDENCE:
-                return result.strip()
-            if not numbers or any(n < 1 or n > len(docs) for n in numbers):
-                return NO_EVIDENCE
-            return result
+            supported_worry = values.get("learning_worry") and any(
+                re.search(r"학습|복습|실습|스터디|동료|코치", d.page_content) for d in docs)
+            if supported_worry:
+                question += "\n" + LEARNING_WORRY_SCOPE
+            # 근거는 재검색하지 않습니다. 걱정 질문의 인용·부분 답변만 한 번 재검토합니다.
+            for attempt in range(2 if supported_worry else 1):
+                result = answer_chain.invoke({"input": question, "context": format_docs(docs),
+                                              "history": values.get("history", [])})
+                result = re.sub(r"\[근거\s*(\d+)\]", r"[근거 \1]", result)
+                numbers = [int(n) for n in re.findall(r"\[근거\s+(\d+)\]", result)]
+                if result.strip() != NO_EVIDENCE and numbers and all(1 <= n <= len(docs) for n in numbers):
+                    return result
+                question += "\n다시 검토하세요. 개인의 결과는 단정하지 말고, 자료에 확인되는 학습 조언만 근거 번호와 함께 설명하세요. 자료가 무관하면 확인 불가 규칙을 따르세요."
+            return NO_EVIDENCE
 
         # 검색은 한 번만 수행하고 같은 문서 목록을 답변과 화면에 반환합니다.
         self.rag_chain = (
@@ -331,6 +335,10 @@ class RAGPipeline:
 
     def invoke(self, values):
         values = dict(values)
+        values["learning_worry"] = bool(re.search(
+            r"잘\s*(?:할|해낼)\s*수|따라\s*갈\s*수|걱정|불안|자신이?\s*없|막막|뒤처|포기", values["input"]))
+        if re.search(r"내일배움카드|국취|자비부담|지원\s*자격|결제", values["input"]):
+            values["learning_worry"] = False
         history = values.get("history", [])[-12:]
         if re.search(r"그중|그것|그걸|그 방법|이 방법|두 번째|첫 번째|세 번째|앞서|이어서", values["input"]):
             latest = next((m for m in reversed(history) if m.get("sources")), {})
@@ -346,6 +354,8 @@ class RAGPipeline:
             values["query"] = search_query((rewrite | self.llm | StrOutputParser()).invoke(
                 {"history": values["history"], "input": values["input"]}))
         track = values.get("profile", {}).get("관심 트랙", "공통")
+        if values["learning_worry"]:
+            values["query"] = values.get("query", search_query(values["input"])) + " 학습 적응 실습 프로젝트 동료 스터디 코치 선배 조언"
         if track != "공통":
             values["query"] = values.get("query", search_query(values["input"])) + " 관심 트랙: " + track
         return self.rag_chain.invoke(values)
@@ -628,6 +638,8 @@ CITATION_RULES = """
 SUPPORTIVE_STYLE_PROMPT = """
 문서를 기반으로 명확하게 답하면서, 사용자가 작은 도전을 시작하도록 돕는 차분하고 따뜻한 학습 선배입니다.
 불안·자신감·진도 고민에는 짧게 공감하고, 백서에서 확인한 학습 방식·지원·협업 방법을 구체적인 이유로 연결하세요.
+'잘할 수 있을까요?'를 개인의 성공 여부를 예측하라는 질문으로만 해석하지 마세요. 결과를 보장할 수 없어도 자료에 확인되는 학습 도움과 실천 방법은 설명할 수 있습니다.
+확인할 수 없는 개인의 미래와 확인되는 문서의 조언을 구분하고, 확인되는 부분까지 일괄 거절하지 마세요.
 그 이유를 바탕으로 지금 시도할 수 있는 행동 1~2개를 제안하고, 질문이나 도움 요청을 주저하지 않도록 격려하세요.
 공감 → 문서 근거에 따른 설명 → 작은 실천 → 상황에 맞는 응원이 자연스럽게 이어지게 하세요.
 이 네 단계를 제목으로 기계적으로 나열하거나, 모든 답변 끝에 같은 위로 문장을 반복하지 마세요.
@@ -636,4 +648,12 @@ SUPPORTIVE_STYLE_PROMPT = """
 '무조건 해낼 수 있다', '반드시 수료·취업한다'처럼 성과를 보장하거나 사용자의 능력을 단정하지 마세요.
 단순 사실·지원 자격·비용 질문은 정확한 결론을 먼저 설명하고 억지로 응원을 덧붙이지 마세요.
 근거 부족 시에는 원본 시스템 프롬프트의 확인 불가 규칙을 그대로 따르세요.
+"""
+
+LEARNING_WORRY_SCOPE = """
+사용자는 학습 과정에 대한 걱정을 말하고 있습니다. 개인의 수료·취업 여부를 예측하거나 보장하지 마세요.
+그 예측은 할 수 없더라도 자료에 확인되는 학습 방식·동료 협업·복습 등의 도움은 설명할 수 있습니다.
+자료에서 확인되는 부분까지 일괄 거절하지 말고, 짧은 공감과 근거 있는 조언, 오늘 시도할 작은 행동을 자연스럽게 연결하세요.
+자료에 나온 사실 뒤에는 실제 [근거 n]을 붙이고, 새로운 학습 순서나 행동 예시는 제안임을 밝혀 주세요.
+자료가 학습과 무관하거나 조언의 근거가 없다면 원본의 확인 불가 규칙을 따르세요.
 """
