@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from uuid import uuid4
 
 import streamlit as st
-from rag_core import rag_pipeline, source_label, user_error
+from rag_core import rag_pipeline, source_label, user_error, check_training_card, CARD_RULE_URL, CARD_RULE_DATE
 
 LOGO_URL = "https://raw.githubusercontent.com/Jangrae/img/master/aivle.png"
 INDEX_VERSION = "1200-200-body-v4-mate"
@@ -21,14 +21,21 @@ FAQ = {
 }
 st.markdown("""<style>
 .stApp{background:linear-gradient(140deg,#f5faf8,#fffaf2 48%,#f5f2ff);color:#18213d;}
-.block-container{max-width:1350px;padding-top:1.8rem;padding-bottom:3rem;}
+.block-container{max-width:1350px;padding-top:5.5rem;padding-bottom:3rem;}
 h1,h2,h3{letter-spacing:-1px;color:#17203c;}h1{font-size:2.2rem!important;}
 [data-testid="stSidebar"]{background:#f4f9f7;}
 [data-testid="stVerticalBlockBorderWrapper"]{background:#ffffffbd;border-radius:20px;}
 .stButton button{border-radius:12px;border-color:#d5e8e2;min-height:42px;}
 .stButton button:hover{border-color:#168c86;color:#0d7875;}
 .stButton button[kind="primary"]{background:#087e7c;border-color:#087e7c;}
-[data-testid="stChatMessage"]{background:#ffffffd9;border:1px solid #e4ece8;border-radius:18px;margin-bottom:12px;}
+[data-testid="stChatMessage"]{background:#ffffffd9;border:1px solid #e4ece8;border-radius:18px;margin-bottom:12px;padding:1.2rem 1.5rem!important;box-sizing:border-box;}
+[data-testid="stChatMessageContent"]{min-width:0;overflow-wrap:anywhere;}
+.st-key-campus_map{position:relative;isolation:isolate;}
+.st-key-campus_map [class*="st-key-map_"]{position:absolute!important;width:31%!important;z-index:20;}
+.st-key-campus_map [class*="st-key-map_"] button{width:100%;border-radius:30px;background:#fffef4;box-shadow:0 5px 16px #43694c20;color:#205953;font-weight:600;}
+.st-key-map_admission{left:3%;top:64%;}.st-key-map_library{left:29%;top:30%;}
+.st-key-map_project{left:67%;top:46%;}.st-key-map_career{left:51%;top:77%;}
+@media(max-width:640px){.block-container{padding-top:5rem;padding-left:1rem;padding-right:1rem;}.st-key-campus_map button p{font-size:12px;}.st-key-campus_map [class*="st-key-map_"] button{min-height:34px;padding:2px;}}
 [data-testid="stChatInput"]{border-radius:16px;border-color:#a8d4cb;}
 .hero{padding:26px 30px;border-radius:24px;background:linear-gradient(120deg,#dff4e9,#fff1cf);margin-bottom:20px;}
 .hero h1{margin:5px 0}.hero p{color:#52645e;margin:0;}
@@ -43,7 +50,8 @@ DEFAULTS = {"pipeline": None, "messages": [], "signature": None, "suggestions": 
             "pending": None, "failed_question": None, "suggestion_round": 0,
             "tasks": [], "memo": "", "assessment": None, "assessment_profile": None,
             "page": "캠퍼스", "topic": "전체", "upload_epoch": 0, "suggestion_context": None,
-            "stage": "교육 중", "track": "공통", "bookmarks": [], "faq_topic": "공부 고민"}
+            "stage": "교육 중", "track": "공통", "bookmarks": [], "faq_topic": "공부 고민",
+            "pending_sources": [], "card_result": None}
 for key, value in DEFAULTS.items():
     st.session_state.setdefault(key, value)
 s = st.session_state
@@ -100,6 +108,7 @@ def reset_document(signature):
     s.messages, s.suggestions = [], []
     s.document_error = s.suggestion_error = s.pending = s.assessment = None
     s.failed_question = s.suggestion_context = None
+    s.pending_sources, s.card_result = [], None
     s.suggestion_round = 0
 
 
@@ -120,13 +129,28 @@ def navigate(page, topic=None, question=None):
         s.go_topic = topic
     if question:
         s.pending = question
+        s.pending_sources = []
     st.rerun()
+
+
+def start_topic(topic):
+    starter = s.pipeline.topic_starter(topic) if s.pipeline else None
+    if starter:
+        s.pending, s.pending_sources = starter["question"], starter["sources"]
+        navigate("질문하기", topic)
+    else:
+        st.info("이 주제의 본문을 찾지 못했어요. 백서를 올리거나 다른 주제를 선택해 주세요.")
 
 
 def add_task(text, source="직접 작성"):
     text = text.strip()
     if text and not any(t["text"] == text for t in s.tasks):
         s.tasks.append({"id": uuid4().hex, "text": text, "done": False, "source": source})
+
+
+def remove_task(task_id):
+    s.tasks = [t for t in s.tasks if t["id"] != task_id]
+    s.pop("task_" + task_id, None)
 
 
 def save_memo():
@@ -167,7 +191,7 @@ def campus_art():
         svg += f'<g transform="translate({x-65},{y-80})"><path d="M0 20L65 0L145 25L80 48Z" fill="{color}"/><path d="M0 20V90L80 120V48Z" fill="#fff6da"/><path d="M80 48V120L145 92V25Z" fill="{color}"/>'
         for a in (15, 42):
             svg += f'<path d="M{a} 45v25l17 6V51Z" fill="#7ec4c4"/>'
-        svg += f'<rect x="25" y="123" width="115" height="26" rx="13" fill="white"/><text x="82" y="141" text-anchor="middle" font-size="13" font-family="sans-serif" fill="#24534b">{label}</text></g>'
+        svg += '</g>'
     for x, y in [(35,170),(220,60),(270,230),(470,70),(760,250),(730,115),(60,320),(490,295)]:
         svg += f'<path d="M{x} {y}v40" stroke="#8f9a56" stroke-width="6"/><circle cx="{x}" cy="{y}" r="22" fill="#8ebf68"/><circle cx="{x-10}" cy="{y+5}" r="15" fill="#a9d27c"/>'
     svg += '</svg>'
@@ -210,7 +234,6 @@ with st.sidebar:
         st.link_button("잡다 역량검사 ↗", "https://www.jobda.im/acca/introduce")
         st.link_button("잡다 역량검사 연습 ↗", "https://www.jobda.im/acc/tutorial")
         st.link_button("고용24 ↗", "https://www.work24.go.kr/")
-        st.caption("문서와 질문은 설정된 API로 전송됩니다. 최근 6턴을 대화에 반영합니다. 기록은 현재 접속 세션에 보관됩니다. PDF 쪽수는 파일 순서입니다.")
 
 if s.active_file and s.pipeline is None:
     if not setting("OPENAI_API_KEY"):
@@ -247,10 +270,12 @@ if s.page == "캠퍼스":
     left, right = st.columns([2.3, 1], gap="large")
     with left:
         hero("AIVLE MATE", "어디부터 둘러볼까요?", "나의 속도로 탐험하는 배움의 캠퍼스")
-        campus_art()
-        for col, (label, topic) in zip(st.columns(4), [("입교 안내소", "입교 준비"), ("학습 도서관", "공부 고민"), ("프로젝트 랩", "팀 프로젝트"), ("커리어 센터", "취업 준비")]):
-            if col.button(label + " →", use_container_width=True):
-                navigate("지원 체크리스트" if topic == "입교 준비" else "질문하기", topic)
+        with st.container(key="campus_map"):
+            campus_art()
+            for key, label, topic in [("admission", "🏫 입교 안내소", "입교 준비"), ("library", "📚 학습 도서관", "공부 고민"), ("project", "💻 프로젝트 랩", "팀 프로젝트"), ("career", "💼 커리어 센터", "취업 준비")]:
+                with st.container(key="map_" + key):
+                    if st.button(label + " →", use_container_width=True):
+                        navigate("질문하기", topic)
     with right:
         with st.container(border=True):
             st.subheader("✧ 선배에게 물어보기")
@@ -309,16 +334,18 @@ elif s.page == "나의 기록":
                 if st.form_submit_button("활동 추가"):
                     add_task(text)
                     st.rerun()
-            for task in s.tasks:
-                task["done"] = st.checkbox(task["text"], value=task["done"], key="task_" + task["id"])
+            for task in list(s.tasks):
+                check, delete = st.columns([6, 1])
+                task["done"] = check.checkbox(task["text"], value=task["done"], key="task_" + task["id"])
+                delete.button("삭제", key="delete_task_" + task["id"], on_click=remove_task, args=(task["id"],))
             if s.tasks:
                 st.progress(sum(t["done"] for t in s.tasks) / len(s.tasks))
         st.subheader("백서 더 알아보기")
         a, b = st.columns(2)
         if a.button("📖 비전공자 가이드", use_container_width=True):
-            navigate("질문하기", "공부 고민", "비전공자가 학습을 시작할 때 어떤 순서로 준비하면 좋을까요?")
+            start_topic("공부 고민")
         if b.button("♧ 팀 프로젝트", use_container_width=True):
-            navigate("질문하기", "팀 프로젝트", "팀 프로젝트에서 협업과 결과 정리를 어떻게 하면 좋을까요?")
+            start_topic("팀 프로젝트")
     with right:
         with st.container(border=True):
             st.subheader("✎ 나의 메모")
@@ -356,23 +383,31 @@ elif s.page == "나의 기록":
             st.button("저장 해제", key="remove_" + item["id"], on_click=remove_bookmark, args=(item["id"],))
 
 elif s.page == "지원 체크리스트":
-    hero("BEFORE YOU APPLY", "지원 전, 하나씩 확인해요.", "백서의 기준과 나의 준비 상태를 함께 살펴봐요")
+    hero("BEFORE YOU APPLY", "나의 상황으로 확인해요.", "내일배움카드 신청 가능성과 백서의 지원 기준 살펴보기")
     left, right = st.columns([1.6, 1], gap="large")
     with left:
         with st.form("eligibility"):
             cohort = st.text_input("확인하려는 기수 / 공고 연도", placeholder="예: 백서에 소개된 10기")
             profile = {}
-            for label in ["해당 공고의 연령 기준", "해당 공고의 학력 기준", "교육 시작일 기준 취업 상태 요건", "교육 시간 전체 참여", "내일배움카드 보유·발급 가능", "K-DT 수강 가능 여부"]:
-                profile[label] = st.radio(label, ["미확인", "충족", "미충족"], horizontal=True, key="elig_" + label)
-            with st.expander("구체적인 상황 입력 (선택)"):
-                for i, (label, placeholder) in enumerate([
-                    ("나이 / 출생연도", "예: 교육 시작일 기준 만 25세"),
-                    ("학력 / 졸업 예정 시기", "예: 4년제 대학 졸업 예정"),
-                    ("취업·재직·사업자등록 상태", "예: 미취업, 사업자등록 없음"),
-                    ("내일배움카드 발급 상태", "예: 발급 완료 / 발급 예정"),
-                    ("다른 정부지원 훈련 수강 이력", "예: 수강 중인 과정 없음"),
-                    ("참여 가능한 시간", "예: 평일 전일 참여 가능")]):
-                    profile[label] = st.text_input(label, placeholder=placeholder, key=f"detail_{i}").strip() or "미입력"
+            st.subheader("현재 나의 상황")
+            profile["만 나이"] = st.text_input("만 나이", placeholder="예: 25 · 모르면 비워 두세요")
+            profile["국적"] = st.selectbox("국적", ["미확인", "대한민국", "외국인·체류자격 확인 필요"])
+            profile["현재 일하는 형태"] = st.selectbox("현재 일하는 형태", ["미확인", "미취업·사업자등록 없음", "임금근로자", "공무원", "사립학교 교직원", "특수형태근로·프리랜서", "개인사업자", "법인대표", "비영리단체 대표", "휴·폐업 등 별도 상황"])
+            profile["현재 학적"] = st.selectbox("현재 학적", ["미확인", "비재학·졸업", "고등학교 1~2학년", "고등학교 졸업예정학년", "대학·대학원 재학", "휴학·원격대학 등 별도 상황"])
+            profile["졸업까지 남은 수업연한 (년)"] = st.text_input("졸업까지 남은 수업연한 (년)", placeholder="대학·대학원 재학생만 · 예: 1.5")
+            profile["학력 / 졸업 예정 시기"] = st.text_input("최종 학력 / 졸업 예정 시기", placeholder="예: 4년제 대학, 2027년 2월 졸업 예정")
+            profile["참여 가능한 시간"] = st.text_input("참여 가능한 시간", placeholder="예: 평일 전일 / 저녁만 가능")
+            with st.expander("재직·사업 중이라면 입력해 주세요"):
+                profile["회사 규모"] = st.selectbox("회사 규모", ["미확인", "대규모 기업", "중소·중견기업"])
+                profile["근로 계약 형태"] = st.selectbox("근로 계약 형태", ["미확인", "일반 상용근로", "기간제·파견·단시간·일용 등"])
+                for label in ["월 임금·소득 (만원)", "사업 기간 (개월)", "연 매출 (만원)"]:
+                    profile[label] = st.text_input(label, placeholder="해당할 때 숫자만 입력 · 모르면 비워 두세요")
+            st.subheader("현재 받고 있는 지원")
+            profile["생계급여"] = st.selectbox("생계급여 수급 상태", ["미확인", "받지 않음", "일반 수급", "조건부 수급·조건부과 유예"])
+            profile["다른 부처·지자체 훈련비"] = st.selectbox("다른 부처·지자체 교육훈련비", ["미확인", "받지 않음", "지원받는 중"])
+            profile["부정수급 관련 상태"] = st.selectbox("훈련 지원 제한·미반환금", ["미확인", "해당 없음", "제한 기간 또는 미반환금 있음"])
+            profile["내일배움카드 발급 상태"] = st.selectbox("현재 카드 상태", ["잘 모르겠음", "아직 신청하지 않음", "신청 중", "유효한 카드 보유", "만료·잔액 등 확인 필요"])
+            profile["다른 정부지원 훈련 수강 이력"] = st.text_input("다른 정부지원 훈련 수강 이력", placeholder="예: 없음 / K-DT 수강한 과정과 시기")
             st.subheader("자비부담금 · 국민취업지원제도")
             profile["국민취업지원제도"] = st.selectbox("국취제 참여 유형", ["미확인", "미참여", "1유형", "2유형 (특정계층)", "2유형 (그 외)"])
             profile["면제 증빙 확인"] = st.checkbox("해당 과정의 면제 대상 증빙을 고용센터에서 확인했어요")
@@ -381,24 +416,36 @@ elif s.page == "지원 체크리스트":
             profile["학습 설정"] = learner_profile()
             profile["추가 상황 / 궁금한 점"] = st.text_area("추가 상황 / 궁금한 점").strip() or "미입력"
             profile["공식 과정 상세의 본인 결제금액"] = st.text_input("고용24 과정 상세의 본인 결제금액 (원, 선택)", placeholder="미확인이라면 비워 두세요").strip() or "미확인"
-            submitted = st.form_submit_button("백서로 체크리스트 확인", type="primary", disabled=s.pipeline is None)
+            submitted = st.form_submit_button("나의 상황 확인하기", type="primary")
         if submitted:
             # 실패한 재요청에서 이전 결과가 새 결과처럼 남지 않도록 먼저 비웁니다.
-            s.assessment = s.assessment_profile = None
+            s.assessment = s.assessment_profile = s.card_result = None
             try:
-                with st.spinner("백서의 조건과 대조하고 있어요…"):
-                    s.assessment = s.pipeline.check_application(profile)
-                    s.assessment_profile = dict(profile)
+                s.card_result = check_training_card(profile)
+                s.assessment_profile = dict(profile)
+                if s.pipeline:
+                    with st.spinner("백서의 지원 조건과 대조하고 있어요…"):
+                        s.assessment = s.pipeline.check_application(profile)
+            except ValueError as error:
+                st.error(str(error))
             except Exception as error:
                 st.error(user_error(error))
+        if s.card_result:
+            with st.container(border=True):
+                st.subheader("국민내일배움카드 사전 확인")
+                st.write("**" + s.card_result["status"] + "**")
+                for reason in s.card_result["excluded"] + s.card_result["review"]:
+                    st.write("• " + reason)
+                st.write(s.card_result["next"])
+                st.caption("입력 상황과 주요 제외 조건을 대조한 결과이며 최종 발급은 고용센터 심사로 결정됩니다. 카드 발급과 AIVLE 선발·K-DT 수강·결제금액은 별도입니다.")
+                st.markdown(f"[고용24 지원 대상·발급 안내]({CARD_RULE_URL}) · 기준 확인 {CARD_RULE_DATE}")
+                if not s.pipeline:
+                    st.info("백서를 올리면 AIVLE 지원 요건과 자비부담금도 함께 대조할 수 있어요.")
         if s.assessment:
             with st.container(border=True):
                 st.subheader("백서 기반 점검 결과")
                 st.caption("마지막 제출 기준입니다. 값을 바꾸면 다시 확인해 주세요.")
                 submitted_profile = s.assessment_profile or {}
-                status_names = {"충족": "충족 (자가입력)", "미충족": "미충족 (자가입력)", "미확인": "추가 확인"}
-                st.table([{"점검 항목": key, "자기점검 상태": status_names[value]}
-                          for key, value in submitted_profile.items() if isinstance(value, str) and value in status_names])
                 entered_fee = submitted_profile.get("공식 과정 상세의 본인 결제금액", "미확인")
                 st.write("본인 입력 결제금액: " + (entered_fee + "원 (미검증)" if entered_fee != "미확인" else "미확인 · 고용24 과정 상세에서 확인"))
                 st.markdown(s.assessment["answer"])
@@ -457,10 +504,11 @@ else:
             try:
                 with st.chat_message("assistant"):
                     with st.spinner("백서에서 함께 찾아보고 있어요…"):
-                        result = s.pipeline.invoke({"input": question, "history": s.messages[:-1], "profile": learner_profile()})
+                        result = s.pipeline.invoke({"input": question, "history": s.messages[:-1], "profile": learner_profile(), "carry_sources": s.pending_sources})
                     st.markdown(result["answer"])
                 s.messages.append({"role": "assistant", "content": result["answer"], "sources": result["sources"]})
                 s.failed_question = s.suggestion_context = None
+                s.pending_sources = []
                 st.rerun()
             except Exception as error:
                 s.failed_question = question
@@ -477,6 +525,7 @@ else:
             for i, question in enumerate(s.suggestions):
                 if st.button(question, key=f"suggestion_{i}", use_container_width=True):
                     s.pending = question
+                    s.pending_sources = []
                     st.rerun()
             if st.button("추천 질문 다시 만들기"):
                 try:
@@ -496,6 +545,7 @@ else:
                 s.file_origin = "chat"
             if text:
                 s.pending = text
+                s.pending_sources = []
             st.rerun()
         if not s.pipeline:
             st.info("백서를 첨부하면 대화를 시작할 수 있어요.")

@@ -33,6 +33,102 @@ def search_query(question):
     return question
 
 
+CARD_RULE_URL = "https://m.work24.go.kr/cm/c/f/1100/selecSystInfo.do?systClId=SC00000048&systId=SI00000351"
+CARD_RULE_DATE = "2026-11-17"
+
+
+def check_training_card(profile):
+    """고용24의 주요 제외 조건을 입력 상황과 대조합니다. 발급 심사는 아닙니다."""
+    excluded, review = [], []
+
+    def number(key):
+        value = str(profile.get(key, "")).strip().replace(",", "")
+        if not value:
+            return None
+        try:
+            result = float(value)
+        except ValueError:
+            raise ValueError(key + "에는 숫자를 입력해 주세요.") from None
+        if not 0 <= result < float("inf"):
+            raise ValueError(key + "에는 0 이상의 유한한 숫자를 입력해 주세요.")
+        return result
+
+    age = number("만 나이")
+    if age is None:
+        review.append("만 나이를 입력해 주세요.")
+    elif age >= 75:
+        excluded.append("만 75세 이상에 해당합니다.")
+    if profile.get("국적") != "대한민국":
+        review.append("국적을 확인해 주세요. 외국인은 체류자격별 지원 대상 확인이 필요합니다.")
+    job = profile.get("현재 일하는 형태", "미확인")
+    monthly = number("월 임금·소득 (만원)")
+    months = number("사업 기간 (개월)")
+    revenue = number("연 매출 (만원)")
+    if job in ("공무원", "사립학교 교직원"):
+        excluded.append("현직 공무원·사립학교 교직원은 원칙적인 지원 제외 대상입니다.")
+    elif job == "임금근로자":
+        size = profile.get("회사 규모", "미확인")
+        if size == "미확인":
+            review.append("재직 회사가 대규모 기업에 해당하는지 확인해 주세요.")
+        elif size == "대규모 기업" and (age is None or age < 45):
+            if monthly is None:
+                review.append("대규모 기업 재직자는 월 임금 확인이 필요합니다.")
+            elif monthly >= 300 and age is not None:
+                if profile.get("근로 계약 형태") == "일반 상용근로":
+                    excluded.append("만 45세 미만 대규모 기업 근로자의 월 임금이 300만원 이상입니다.")
+                else:
+                    review.append("대규모 기업의 기간제·파견·단시간·일용근로 등 예외 적용을 확인해 주세요.")
+    elif job == "특수형태근로·프리랜서":
+        if monthly is None:
+            review.append("특수형태근로·프리랜서는 월 소득 확인이 필요합니다.")
+        elif monthly >= 500:
+            excluded.append("특수형태근로종사자 월 소득 500만원 이상 조건에 해당합니다.")
+    elif job in ("개인사업자", "법인대표"):
+        if months is None:
+            review.append("사업 기간을 입력해 주세요.")
+        elif months < 12:
+            excluded.append("사업 기간 1년 미만 조건에 해당합니다. 휴·폐업 등 특수 상황은 별도 확인해 주세요.")
+        amount, limit = (revenue, 40000) if job == "개인사업자" else (monthly, 300)
+        if amount is None:
+            review.append("개인사업자는 연 매출, 법인대표는 월 소득 확인이 필요합니다.")
+        elif amount >= limit:
+            excluded.append("개인사업자 연 매출 4억원 이상 또는 법인대표 월 소득 300만원 이상 조건에 해당합니다.")
+    elif job == "비영리단체 대표":
+        if monthly is None:
+            review.append("비영리단체 대표의 월 소득을 입력해 주세요.")
+        elif monthly >= 300:
+            excluded.append("비영리단체 대표 월 소득 300만원 이상 조건에 해당합니다.")
+    elif job != "미취업·사업자등록 없음":
+        review.append("재직·사업자등록 상태와 적용 예외를 확인해 주세요.")
+    education = profile.get("현재 학적", "미확인")
+    if education == "고등학교 1~2학년":
+        excluded.append("고등학교 1~2학년 재학생 조건에 해당합니다.")
+    elif education == "대학·대학원 재학":
+        years = number("졸업까지 남은 수업연한 (년)")
+        if years is None:
+            review.append("대학·대학원은 졸업까지 남은 수업연한 확인이 필요합니다.")
+        elif years > 2:
+            excluded.append("졸업까지 남은 수업연한이 2년을 초과합니다.")
+        elif years == 2:
+            # 공식 안내의 '2년 이상'과 다른 공공 안내의 '2년 초과' 경계는 단정하지 않습니다.
+            review.append("남은 수업연한이 정확히 2년이면 학교 유형·졸업 예정 시점을 고용센터에 확인해 주세요.")
+    elif education not in ("비재학·졸업", "고등학교 졸업예정학년"):
+        review.append("현재 학적을 입력해 주세요. 휴학·원격대학 등은 별도 적용 기준을 확인해야 합니다.")
+    for key, blocked, reason in (
+        ("생계급여", "일반 수급", "일반 생계급여 수급자는 제외 대상입니다. 조건부 수급·조건부과 유예는 예외입니다."),
+        ("다른 부처·지자체 훈련비", "지원받는 중", "다른 부처·지자체 교육훈련비 중복 지원에 해당할 수 있습니다."),
+        ("부정수급 관련 상태", "제한 기간 또는 미반환금 있음", "부정수급에 따른 제한 기간·미반환금이 있습니다."),
+    ):
+        value = profile.get(key, "미확인")
+        if value == blocked:
+            excluded.append(reason)
+        elif value == "미확인":
+            review.append(key + " 상태를 확인해 주세요.")
+    status = "지원 제외 조건에 해당할 수 있어요" if excluded else "추가 확인이 필요해요" if review else "입력한 주요 조건상 발급 신청을 검토할 수 있어요"
+    return {"status": status, "excluded": excluded, "review": review,
+            "next": "미취업 상태라면 고용24 구직 신청 후 카드 발급을 신청하세요." if job == "미취업·사업자등록 없음" else "고용24 발급 신청에서 제출 서류와 예외 적용을 확인하세요."}
+
+
 def read_pages(data, filename):
     """열람용 원문: 목차와 빈 페이지도 실제 순서대로 보관합니다."""
     if Path(filename).suffix.lower() == ".pdf":
@@ -176,6 +272,7 @@ class RAGPipeline:
             result = answer_chain.invoke({"input": question, "context": format_docs(docs),
                                           "history": values.get("history", [])})
             # 존재하지 않는 번호나 출처 없는 단정은 그대로 내보내지 않습니다.
+            result = re.sub(r"\[근거\s*(\d+)\]", r"[근거 \1]", result)
             numbers = [int(n) for n in re.findall(r"\[근거\s+(\d+)\]", result)]
             if result.strip() == NO_EVIDENCE:
                 return result.strip()
@@ -209,6 +306,22 @@ class RAGPipeline:
         if track != "공통":
             values["query"] = values.get("query", search_query(values["input"])) + " 관심 트랙: " + track
         return self.rag_chain.invoke(values)
+
+    def topic_starter(self, topic):
+        # 버튼의 첫 질문도 실제 본문에서 시작합니다. 같은 근거가 답변과 패널에 전달됩니다.
+        terms = ("프로젝트", "협업", "역할 분담") if topic == "팀 프로젝트" else ("비전공", "학습 전략", "복습")
+        candidates = [d for d in self.documents if any(t in d.page_content for t in terms)
+                      and d.page_content.count("http") < 4]
+        if not candidates:
+            return None
+        def score(doc):
+            text = doc.page_content
+            headings = " ".join(re.findall(r"(?m)^#+[^\n]+", text))
+            return sum(text.count(t) for t in terms) + 5 * sum(t in headings for t in terms)
+        docs = sorted(candidates, key=score, reverse=True)[:2]
+        question = ("백서에서 프로젝트의 진행 방식과 준비에 대해 설명하는 내용을 요약해 주세요."
+                    if topic == "팀 프로젝트" else "백서에서 비전공자의 준비와 학습 방법에 대해 설명하는 내용을 요약해 주세요.")
+        return {"question": question, "sources": docs}
 
     def make_suggestions(self, history=None, sources=None, offset=0, previous=None, topic="전체", profile=None):
         count = min(6, len(self.documents))
@@ -267,8 +380,9 @@ class RAGPipeline:
              "국취제 2유형 전체를 면제라고 일반화하지 마세요. 개인 금액이 문서에 없으면 임의 금액·비율 계산을 하지 마세요. "
              "미확인을 충족으로 간주하지 마세요. 가능한 부분의 설명까지 일괄 거부하지 마세요. "
              "<reference_documents>\n{context}\n</reference_documents>"),
-            ("human", "자가입력: {profile}\n지원 요건과 자비부담금·면제 여부를 확인하는 데 필요한 조건을 "
-             "항목별로 설명하고, 백서 기준 / 사용자 상황 / 충족(자가입력 기준)·보완 필요·확인 불가 / 근거를 표로 대조하세요. "
+            ("human", "사용자가 입력한 실제 상황: {profile}\nAIVLE 지원 요건과 자비부담금·면제 여부를 확인하는 데 필요한 조건을 "
+             "항목별로 설명하고, 백서 기준 / 사용자 상황 / 검토 결과·추가 확인 / 근거를 표로 대조하세요. "
+             "내일배움카드 발급 사전 확인은 별도 공식 기준 화면에서 제공됩니다. 백서의 카드 보유 요건과 카드 발급 자격을 혼동하지 마세요. "
              "모르는 항목이나 증빙이 필요한 항목은 확인 불가로 남기세요. 확인할 곳과 다음 행동 3가지를 안내하세요. "
              "각 문서 규정 뒤에 [근거 n]을 붙이세요. "
              "사용자 입력 결제금액은 검증된 값으로 취급하지 마세요.")])
