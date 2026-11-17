@@ -11,7 +11,7 @@ import streamlit as st
 from rag_core import rag_pipeline, source_label, user_error, check_training_card, CARD_RULE_URL, CARD_RULE_DATE
 
 LOGO_URL = "https://raw.githubusercontent.com/Jangrae/img/master/aivle.png"
-INDEX_VERSION = "1200-200-body-v10-learning-support"
+INDEX_VERSION = "1200-200-body-v11-partial-evidence"
 st.set_page_config(page_title="AIVLE MATE · 나의 학습 캠퍼스", page_icon="🌿", layout="wide")
 
 FAQ = {
@@ -78,6 +78,32 @@ def record_data(entry):
     # JSON 내보내기에서는 Document 객체를 텍스트와 메타데이터로 바꿉니다.
     return {key: ([{"text": d.page_content, "metadata": d.metadata} for d in value]
                   if key == "sources" else value) for key, value in entry.items()}
+
+
+def learning_text():
+    tasks = "\n".join(("[x] " if t["done"] else "[ ] ") + t["text"].replace("\n", " ") for t in s.tasks)
+    return "AIVLE 학습 기록\n[활동]\n" + tasks + "\n[메모]\n" + s.memo
+
+
+def parse_learning_record(data, filename):
+    if filename.lower().endswith(".json"):
+        return json.loads(data)
+    text = data.decode("utf-8-sig")
+    if not text.startswith("AIVLE 학습 기록\n[활동]\n") or "\n[메모]\n" not in text:
+        raise ValueError()
+    tasks, memo = text[len("AIVLE 학습 기록\n[활동]\n"):].split("\n[메모]\n", 1)
+    rows = [line for line in tasks.splitlines() if line]
+    if any(not line.startswith(("[x] ", "[ ] ")) for line in rows):
+        raise ValueError()
+    return {"tasks": [{"text": line[4:], "done": line.startswith("[x]")} for line in rows], "memo": memo}
+
+
+def saved_answers_text():
+    entries = []
+    for item in s.bookmarks:
+        sources = "\n\n".join(f"[근거 {i}] {source_label(d)}\n{d.page_content}" for i, d in enumerate(item["sources"], 1))
+        entries.append(f"질문: {item['question']}\n저장 시각: {item['time']}\n문서: {item['doc_name']}\n\n{item['content']}\n\n{sources}")
+    return "AIVLE 저장한 답변\n\n" + "\n\n".join(entries)
 
 
 def store_bookmark(entry):
@@ -442,12 +468,12 @@ elif s.page == "나의 기록":
             st.subheader("✎ 나의 메모")
             st.text_area("학습 메모", value=s.memo, key="memo_input", on_change=save_memo,
                          height=220, label_visibility="collapsed")
-        st.download_button("학습 기록 저장", json.dumps({"tasks": s.tasks, "memo": s.memo}, ensure_ascii=False, indent=2), "aivle_learning.json", "application/json")
+        st.download_button("학습 기록 저장", learning_text().encode("utf-8-sig"), "aivle_learning.txt", "text/plain")
         with st.expander("저장한 기록 불러오기"):
-            imported = st.file_uploader("학습 기록 JSON", type=["json"], key="import_records")
+            imported = st.file_uploader("학습 기록 TXT / 기존 JSON", type=["txt", "json"], key="import_records")
             if st.button("기록 불러오기", disabled=imported is None):
                 try:
-                    data = json.loads(imported.getvalue())
+                    data = parse_learning_record(imported.getvalue(), imported.name)
                     if not isinstance(data, dict) or not isinstance(data.get("tasks"), list) or not isinstance(data.get("memo", ""), str):
                         raise ValueError()
                     clean = []
@@ -458,12 +484,11 @@ elif s.page == "나의 기록":
                     s.tasks = clean
                     s.import_memo = data.get("memo", "")[:20000]
                     st.rerun()
-                except (ValueError, TypeError, KeyError):
+                except (ValueError, TypeError, KeyError, UnicodeError):
                     st.error("올바른 학습 기록 파일을 선택해 주세요.")
     st.divider()
     st.subheader("☆ 저장한 답변")
-    st.download_button("저장한 답변 다운로드", json.dumps([record_data(item) for item in s.bookmarks],
-        ensure_ascii=False, indent=2).encode("utf-8"), "aivle_saved_answers.json", "application/json", disabled=not s.bookmarks)
+    st.download_button("저장한 답변 다운로드", saved_answers_text().encode("utf-8-sig"), "aivle_saved_answers.txt", "text/plain", disabled=not s.bookmarks)
     if not s.bookmarks:
         st.caption("대화나 체크리스트 결과에서 ☆ 답변 저장을 눌러 보세요.")
     for item in list(s.bookmarks):
