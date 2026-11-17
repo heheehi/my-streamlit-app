@@ -293,7 +293,10 @@ elif s.page == "백서 살펴보기":
                 format_func=lambda n: f"PDF {n}쪽" if is_pdf else "TXT 전체", key="reader_page")
             st.caption(f"{len(matches)} / {len(pages)}쪽 · 실제 PDF 순서" if is_pdf else "TXT 전체 원문")
             text = next(p["text"] for p in matches if p["page"] == number)
-            st.text(text) if text.strip() else st.info("이 페이지에는 추출된 텍스트가 없습니다.")
+            if text.strip():
+                st.text(text)
+            else:
+                st.info("이 페이지에는 추출된 텍스트가 없습니다.")
 
 elif s.page == "나의 기록":
     hero("MY LEARNING DESK", "오늘은 한 걸음만 더.", "작은 실천을 모아 나의 학습 기록으로")
