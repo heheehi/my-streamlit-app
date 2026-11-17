@@ -2,14 +2,23 @@ import base64
 import hashlib
 import html
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from uuid import uuid4
 
 import streamlit as st
 from rag_core import rag_pipeline, source_label, user_error
 
 LOGO_URL = "https://raw.githubusercontent.com/Jangrae/img/master/aivle.png"
-INDEX_VERSION = "1200-200-body-v3-desk"
-st.set_page_config(page_title="AIVLE · 나의 학습 캠퍼스", page_icon="🌿", layout="wide")
+INDEX_VERSION = "1200-200-body-v4-mate"
+st.set_page_config(page_title="AIVLE MATE · 나의 학습 캠퍼스", page_icon="🌿", layout="wide")
+
+FAQ = {
+    "입교 준비": ["입교 전에 무엇을 준비하면 좋을까요?", "비전공자가 미리 공부할 내용을 알려 주세요.", "교육 과정과 하루 일과는 어떻게 되나요?"],
+    "공부 고민": ["수업 진도를 따라가기 어려울 때 어떻게 공부해야 하나요?", "백서에서 추천하는 복습 방법을 알려 주세요.", "백서의 조언을 바탕으로 일주일 학습 계획을 제안해 주세요."],
+    "팀 프로젝트": ["미니프로젝트는 어떻게 준비하면 좋을까요?", "팀의 역할 분담과 협업 방법을 알려 주세요.", "프로젝트에서 나의 기여를 어떻게 정리하면 좋을까요?"],
+    "취업 준비": ["관심 트랙의 취업 사례와 준비 방법을 알려 주세요.", "포트폴리오에 어떤 내용을 담으면 좋을까요?", "프로젝트 경험을 자기소개서와 면접에 어떻게 활용하나요?"],
+}
 st.markdown("""<style>
 .stApp{background:linear-gradient(140deg,#f5faf8,#fffaf2 48%,#f5f2ff);color:#18213d;}
 .block-container{max-width:1350px;padding-top:1.8rem;padding-bottom:3rem;}
@@ -33,10 +42,48 @@ DEFAULTS = {"pipeline": None, "messages": [], "signature": None, "suggestions": 
             "suggestion_error": None, "document_error": None, "active_file": None,
             "pending": None, "failed_question": None, "suggestion_round": 0,
             "tasks": [], "memo": "", "assessment": None, "assessment_profile": None,
-            "page": "캠퍼스", "topic": "전체", "upload_epoch": 0, "suggestion_context": None}
+            "page": "캠퍼스", "topic": "전체", "upload_epoch": 0, "suggestion_context": None,
+            "stage": "교육 중", "track": "공통", "bookmarks": [], "faq_topic": "공부 고민"}
 for key, value in DEFAULTS.items():
     st.session_state.setdefault(key, value)
 s = st.session_state
+
+
+def learner_profile():
+    return {"나의 단계": s.stage, "관심 트랙": s.track}
+
+
+def now_text():
+    return datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M")
+
+
+def record_data(entry):
+    # JSON 내보내기에서는 Document 객체를 텍스트와 메타데이터로 바꿉니다.
+    return {key: ([{"text": d.page_content, "metadata": d.metadata} for d in value]
+                  if key == "sources" else value) for key, value in entry.items()}
+
+
+def store_bookmark(entry):
+    if not any(item["id"] == entry["id"] for item in s.bookmarks):
+        s.bookmarks.append(dict(entry))
+
+
+def remove_bookmark(entry_id):
+    s.bookmarks = [item for item in s.bookmarks if item["id"] != entry_id]
+
+
+def bookmark_button(message, question, prefix):
+    # 저장 시점의 문서·쪽수·사용자 설정을 함께 보관합니다.
+    message.setdefault("id", uuid4().hex)
+    message.setdefault("time", now_text())
+    message.setdefault("doc_name", s.active_file["name"] if s.active_file else "")
+    message.setdefault("profile", learner_profile())
+    entry = {"id": message["id"], "question": question, "content": message.get("content", message.get("answer", "")),
+             "sources": message.get("sources", []), "time": message["time"],
+             "doc_name": message["doc_name"], "profile": message["profile"]}
+    saved = any(item["id"] == entry["id"] for item in s.bookmarks)
+    st.button("✓ 저장한 답변" if saved else "☆ 답변 저장", key=prefix + entry["id"], disabled=saved,
+              on_click=store_bookmark, args=(entry,))
 
 
 def setting(name):
@@ -103,9 +150,9 @@ def refresh_suggestions():
     latest = next((m for m in reversed(s.messages) if m["role"] == "assistant"), {})
     s.suggestions = s.pipeline.make_suggestions(history=[{"role": m["role"], "content": m["content"]}
         for m in s.messages[-4:]], sources=latest.get("sources"), offset=s.suggestion_round * 3,
-        previous=s.suggestions, topic=s.topic)
+        previous=s.suggestions, topic=s.topic, profile=learner_profile())
     s.suggestion_round += 1
-    s.suggestion_context = (len(s.messages), s.topic)
+    s.suggestion_context = (len(s.messages), s.topic, s.stage, s.track)
     s.suggestion_error = None
 
 
@@ -128,9 +175,14 @@ def campus_art():
     st.markdown(f'<img alt="네 개의 학습 공간이 있는 캠퍼스 지도" style="width:100%;border-radius:24px" src="data:image/svg+xml;base64,{encoded}">', unsafe_allow_html=True)
 
 
+if s.pipeline is not None and s.get("pipeline_version") != INDEX_VERSION:
+    reset_document(s.signature)
+
 # 업로더의 이전 값이 채팅에서 교체한 파일을 덮어쓰지 않도록 변경을 구분합니다.
 with st.sidebar:
     st.image(LOGO_URL, width=165)
+    st.selectbox("나의 단계", ["입교 전", "교육 중", "수료 후"], key="stage")
+    st.selectbox("관심 트랙", ["공통", "AI 개발자", "DX 컨설턴트"], key="track")
     uploaded = st.file_uploader("백서 올리기", type=["pdf", "txt"], key=f"upload_{s.upload_epoch}")
     if uploaded is not None:
         widget_id = hashlib.sha256(uploaded.name.encode() + uploaded.getvalue()).hexdigest()
@@ -145,6 +197,8 @@ with st.sidebar:
             s.active_file = None
     if s.active_file:
         st.caption(s.active_file["name"])
+        st.download_button("백서 다운로드", s.active_file["data"], s.active_file["name"],
+                           "application/pdf" if s.active_file["name"].lower().endswith(".pdf") else "text/plain")
         if st.button("문서 제거"):
             reset_document(None)
             s.active_file, s.last_widget_file = None, None
@@ -167,6 +221,7 @@ if s.active_file and s.pipeline is None:
                 s.pipeline = rag_pipeline(s.active_file["data"], s.active_file["name"], api_key=setting("OPENAI_API_KEY"),
                     base_url=setting("OPENAI_BASE_URL") or setting("OPENAI_API_BASE") or None,
                     organization=setting("OPENAI_ORGANIZATION") or None)
+                s.pipeline_version = INDEX_VERSION
             s.document_error = None
         except Exception as error:
             s.document_error = user_error(error)
@@ -185,13 +240,13 @@ brand, navigation = st.columns([1, 4])
 with brand:
     st.image(LOGO_URL, width=155)
 with navigation:
-    st.radio("공간 이동", ["캠퍼스", "질문하기", "나의 기록", "지원 체크리스트"], key="page", horizontal=True, label_visibility="collapsed")
+    st.radio("공간 이동", ["캠퍼스", "질문하기", "주제별 FAQ", "백서 살펴보기", "나의 기록", "지원 체크리스트"], key="page", horizontal=True, label_visibility="collapsed")
 st.divider()
 
 if s.page == "캠퍼스":
     left, right = st.columns([2.3, 1], gap="large")
     with left:
-        hero("AIVLE SCHOOL 학습도우미", "어디부터 둘러볼까요?", "나의 속도로 탐험하는 배움의 캠퍼스")
+        hero("AIVLE MATE", "어디부터 둘러볼까요?", "나의 속도로 탐험하는 배움의 캠퍼스")
         campus_art()
         for col, (label, topic) in zip(st.columns(4), [("입교 안내소", "입교 준비"), ("학습 도서관", "공부 고민"), ("프로젝트 랩", "팀 프로젝트"), ("커리어 센터", "취업 준비")]):
             if col.button(label + " →", use_container_width=True):
@@ -209,6 +264,36 @@ if s.page == "캠퍼스":
             st.write(f"{sum(t['done'] for t in s.tasks)} / {len(s.tasks)} 완료")
             if st.button("나의 학습 데스크 →"):
                 navigate("나의 기록")
+
+elif s.page == "주제별 FAQ":
+    hero("AIVLE MATE · FAQ", "궁금한 주제부터 골라요.", "질문을 선택하면 지금 올린 백서에서 답을 찾습니다")
+    topic = st.selectbox("FAQ 주제", list(FAQ), key="faq_topic")
+    for i, question in enumerate(FAQ[topic]):
+        if st.button(question, key=f"faq_{i}", disabled=s.pipeline is None, use_container_width=True):
+            navigate("질문하기", topic, question)
+    if s.pipeline is None:
+        st.info("백서를 올리면 주제별 질문을 시작할 수 있어요.")
+
+elif s.page == "백서 살펴보기":
+    hero("WHITEPAPER", "백서를 직접 펼쳐보세요.", "전체 검색과 페이지별 원문 열람")
+    if s.pipeline is None:
+        st.info("먼저 PDF 또는 TXT를 올려 주세요.")
+    else:
+        pages = s.pipeline.pages
+        keyword = st.text_input("백서 전체에서 검색", key="reader_search").strip()
+        matches = [p for p in pages if not keyword or keyword.casefold() in p["text"].casefold()]
+        is_pdf = s.active_file["name"].lower().endswith(".pdf")
+        if not matches:
+            st.info("검색어가 포함된 원문이 없습니다.")
+        else:
+            numbers = [p["page"] for p in matches]
+            if s.get("reader_page") not in numbers:
+                s.reader_page = numbers[0]
+            number = st.selectbox("페이지 선택" if is_pdf else "문서 구간", numbers,
+                format_func=lambda n: f"PDF {n}쪽" if is_pdf else "TXT 전체", key="reader_page")
+            st.caption(f"{len(matches)} / {len(pages)}쪽 · 실제 PDF 순서" if is_pdf else "TXT 전체 원문")
+            text = next(p["text"] for p in matches if p["page"] == number)
+            st.text(text) if text.strip() else st.info("이 페이지에는 추출된 텍스트가 없습니다.")
 
 elif s.page == "나의 기록":
     hero("MY LEARNING DESK", "오늘은 한 걸음만 더.", "작은 실천을 모아 나의 학습 기록으로")
@@ -254,6 +339,18 @@ elif s.page == "나의 기록":
                     st.rerun()
                 except (ValueError, TypeError, KeyError):
                     st.error("올바른 학습 기록 파일을 선택해 주세요.")
+    st.divider()
+    st.subheader("☆ 저장한 답변")
+    st.download_button("저장한 답변 다운로드", json.dumps([record_data(item) for item in s.bookmarks],
+        ensure_ascii=False, indent=2).encode("utf-8"), "aivle_saved_answers.json", "application/json", disabled=not s.bookmarks)
+    if not s.bookmarks:
+        st.caption("대화나 체크리스트 결과에서 ☆ 답변 저장을 눌러 보세요.")
+    for item in list(s.bookmarks):
+        with st.expander(item["question"], expanded=True):
+            st.caption(f"{item['doc_name']} · {item['time']} · {item['profile']['나의 단계']} · {item['profile']['관심 트랙']}")
+            st.markdown(item["content"])
+            sources_panel(item["sources"])
+            st.button("저장 해제", key="remove_" + item["id"], on_click=remove_bookmark, args=(item["id"],))
 
 elif s.page == "지원 체크리스트":
     hero("BEFORE YOU APPLY", "지원 전, 하나씩 확인해요.", "백서의 기준과 나의 준비 상태를 함께 살펴봐요")
@@ -264,14 +361,27 @@ elif s.page == "지원 체크리스트":
             profile = {}
             for label in ["해당 공고의 연령 기준", "해당 공고의 학력 기준", "교육 시작일 기준 취업 상태 요건", "교육 시간 전체 참여", "내일배움카드 보유·발급 가능", "K-DT 수강 가능 여부"]:
                 profile[label] = st.radio(label, ["미확인", "충족", "미충족"], horizontal=True, key="elig_" + label)
+            with st.expander("구체적인 상황 입력 (선택)"):
+                for i, (label, placeholder) in enumerate([
+                    ("나이 / 출생연도", "예: 교육 시작일 기준 만 25세"),
+                    ("학력 / 졸업 예정 시기", "예: 4년제 대학 졸업 예정"),
+                    ("취업·재직·사업자등록 상태", "예: 미취업, 사업자등록 없음"),
+                    ("내일배움카드 발급 상태", "예: 발급 완료 / 발급 예정"),
+                    ("다른 정부지원 훈련 수강 이력", "예: 수강 중인 과정 없음"),
+                    ("참여 가능한 시간", "예: 평일 전일 참여 가능")]):
+                    profile[label] = st.text_input(label, placeholder=placeholder, key=f"detail_{i}").strip() or "미입력"
             st.subheader("자비부담금 · 국민취업지원제도")
             profile["국민취업지원제도"] = st.selectbox("국취제 참여 유형", ["미확인", "미참여", "1유형", "2유형 (특정계층)", "2유형 (그 외)"])
             profile["면제 증빙 확인"] = st.checkbox("해당 과정의 면제 대상 증빙을 고용센터에서 확인했어요")
             profile["다른 면제 사유"] = st.text_input("다른 면제 사유 (선택)", placeholder="공식 확인한 사항만 입력")
             profile["기수·공고"] = cohort or "미확인"
+            profile["학습 설정"] = learner_profile()
+            profile["추가 상황 / 궁금한 점"] = st.text_area("추가 상황 / 궁금한 점").strip() or "미입력"
             profile["공식 과정 상세의 본인 결제금액"] = st.text_input("고용24 과정 상세의 본인 결제금액 (원, 선택)", placeholder="미확인이라면 비워 두세요").strip() or "미확인"
             submitted = st.form_submit_button("백서로 체크리스트 확인", type="primary", disabled=s.pipeline is None)
         if submitted:
+            # 실패한 재요청에서 이전 결과가 새 결과처럼 남지 않도록 먼저 비웁니다.
+            s.assessment = s.assessment_profile = None
             try:
                 with st.spinner("백서의 조건과 대조하고 있어요…"):
                     s.assessment = s.pipeline.check_application(profile)
@@ -285,11 +395,12 @@ elif s.page == "지원 체크리스트":
                 submitted_profile = s.assessment_profile or {}
                 status_names = {"충족": "충족 (자가입력)", "미충족": "미충족 (자가입력)", "미확인": "추가 확인"}
                 st.table([{"점검 항목": key, "자기점검 상태": status_names[value]}
-                          for key, value in submitted_profile.items() if value in status_names])
+                          for key, value in submitted_profile.items() if isinstance(value, str) and value in status_names])
                 entered_fee = submitted_profile.get("공식 과정 상세의 본인 결제금액", "미확인")
                 st.write("본인 입력 결제금액: " + (entered_fee + "원 (미검증)" if entered_fee != "미확인" else "미확인 · 고용24 과정 상세에서 확인"))
                 st.markdown(s.assessment["answer"])
                 sources_panel(s.assessment["sources"])
+                bookmark_button(s.assessment, "지원 체크리스트 검토", "check_")
     with right:
         with st.container(border=True):
             st.subheader("확인부터 시작해요")
@@ -320,6 +431,8 @@ else:
                 st.markdown(message["content"])
                 if message.get("sources"):
                     sources_panel(message["sources"])
+                    previous_question = next((m["content"] for m in reversed(s.messages[:i]) if m["role"] == "user"), "저장한 답변")
+                    bookmark_button(message, previous_question, "chat_")
                     if "actions" not in message and st.button("이 답변에서 실천할 활동 찾기", key=f"find_{i}"):
                         try:
                             message["actions"] = s.pipeline.make_actions(message["content"])
@@ -341,7 +454,7 @@ else:
             try:
                 with st.chat_message("assistant"):
                     with st.spinner("백서에서 함께 찾아보고 있어요…"):
-                        result = s.pipeline.invoke({"input": question, "history": s.messages[:-1]})
+                        result = s.pipeline.invoke({"input": question, "history": s.messages[:-1], "profile": learner_profile()})
                     st.markdown(result["answer"])
                 s.messages.append({"role": "assistant", "content": result["answer"], "sources": result["sources"]})
                 s.failed_question = s.suggestion_context = None
@@ -353,7 +466,7 @@ else:
             s.pending, s.failed_question = s.failed_question, None
             st.rerun()
         if s.pipeline:
-            if s.suggestion_context != (len(s.messages), s.topic) and not s.suggestion_error:
+            if s.suggestion_context != (len(s.messages), s.topic, s.stage, s.track) and not s.suggestion_error:
                 try:
                     refresh_suggestions()
                 except Exception as error:
