@@ -123,7 +123,7 @@ def check_training_card(profile):
         if value == blocked:
             excluded.append(reason)
         elif value == "미확인":
-            review.append(key + " 상태를 확인해 주세요.")
+            review.append(key + " 항목을 확인해 주세요.")
     status = "지원 제외 조건에 해당할 수 있어요" if excluded else "추가 확인이 필요해요" if review else "입력한 주요 조건상 발급 신청을 검토할 수 있어요"
     return {"status": status, "excluded": excluded, "review": review,
             "next": "미취업 상태라면 고용24 구직 신청 후 카드 발급을 신청하세요." if job == "미취업·사업자등록 없음" else "고용24 발급 신청에서 제출 서류와 예외 적용을 확인하세요."}
@@ -388,6 +388,7 @@ class RAGPipeline:
              "사용자 입력 결제금액은 검증된 값으로 취급하지 마세요.")])
         answer = (prompt | self.llm | StrOutputParser()).invoke({
             "context": format_docs(docs), "profile": json.dumps(profile, ensure_ascii=False)})
+        answer = re.sub(r"\[근거\s*(\d+)\]", r"[근거 \1]", answer)
         numbers = [int(n) for n in re.findall(r"\[근거\s+(\d+)\]", answer)]
         if not numbers or any(n < 1 or n > len(docs) for n in numbers):
             answer = "검증 가능한 규정 설명을 만들지 못했습니다. 아래 검색 근거와 공식 공고를 확인해 주세요."

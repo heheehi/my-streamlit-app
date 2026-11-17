@@ -469,6 +469,7 @@ else:
                  on_change=save_topic, label_visibility="collapsed")
         if st.button("대화 삭제", use_container_width=True):
             s.messages, s.suggestions, s.pending = [], [], None
+            s.pending_sources = []
             s.suggestion_context = s.failed_question = None
             st.rerun()
         transcript = "\n\n".join(("나" if m["role"] == "user" else "학습 도우미") + ": " + m["content"] + "\n" +
